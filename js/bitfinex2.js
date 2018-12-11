@@ -12,8 +12,9 @@ module.exports = class bitfinex2 extends bitfinex {
         return this.deepExtend (super.describe (), {
             'id': 'bitfinex2',
             'name': 'Bitfinex v2',
-            'countries': 'VG',
+            'countries': [ 'VG' ],
             'version': 'v2',
+            'certified': false,
             // new metainfo interface
             'has': {
                 'CORS': true,
@@ -77,17 +78,19 @@ module.exports = class bitfinex2 extends bitfinex {
                         'book/{symbol}/P2',
                         'book/{symbol}/P3',
                         'book/{symbol}/R0',
-                        'stats1/{key}:{size}:{symbol}/{side}/{section}',
-                        'stats1/{key}:{size}:{symbol}/long/last',
-                        'stats1/{key}:{size}:{symbol}/long/hist',
-                        'stats1/{key}:{size}:{symbol}/short/last',
-                        'stats1/{key}:{size}:{symbol}/short/hist',
+                        'stats1/{key}:{size}:{symbol}:{side}/{section}',
+                        'stats1/{key}:{size}:{symbol}/{section}',
+                        'stats1/{key}:{size}:{symbol}:long/last',
+                        'stats1/{key}:{size}:{symbol}:long/hist',
+                        'stats1/{key}:{size}:{symbol}:short/last',
+                        'stats1/{key}:{size}:{symbol}:short/hist',
                         'candles/trade:{timeframe}:{symbol}/{section}',
                         'candles/trade:{timeframe}:{symbol}/last',
                         'candles/trade:{timeframe}:{symbol}/hist',
                     ],
                     'post': [
                         'calc/trade/avg',
+                        'calc/fx',
                     ],
                 },
                 'private': {
@@ -115,6 +118,10 @@ module.exports = class bitfinex2 extends bitfinex {
                         'auth/w/alert/{type}:{symbol}:{price}/del',
                         'auth/calc/order/avail',
                         'auth/r/ledgers/{symbol}/hist',
+                        'auth/r/settings',
+                        'auth/w/settings/set',
+                        'auth/w/settings/del',
+                        'auth/r/info/user',
                     ],
                 },
             },
@@ -152,6 +159,26 @@ module.exports = class bitfinex2 extends bitfinex {
                         'SNT': 14.303,
                         'QASH': 3.2428,
                         'YYW': 18.055,
+                    },
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://api.bitfinex.com/ws/2',
+                    },
+                },
+                'methodmap': {
+                    '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
                     },
                 },
             },
@@ -212,7 +239,6 @@ module.exports = class bitfinex2 extends bitfinex {
                 'active': true,
                 'precision': precision,
                 'limits': limits,
-                'lot': Math.pow (10, -precision['amount']),
                 'info': market,
             });
         }
@@ -238,6 +264,8 @@ module.exports = class bitfinex2 extends bitfinex {
                     currency = currency.slice (1);
                     code = currency.toUpperCase ();
                     code = this.commonCurrencyCode (code);
+                } else {
+                    code = this.commonCurrencyCode (code);
                 }
                 let account = this.account ();
                 account['total'] = total;
@@ -246,7 +274,7 @@ module.exports = class bitfinex2 extends bitfinex {
                         account['free'] = 0;
                         account['used'] = total;
                     } else {
-                        account['free'] = undefined;
+                        account['free'] = total;
                     }
                 } else {
                     account['free'] = available;
@@ -308,7 +336,7 @@ module.exports = class bitfinex2 extends bitfinex {
             'last': last,
             'previousClose': undefined,
             'change': ticker[length - 6],
-            'percentage': ticker[length - 5],
+            'percentage': ticker[length - 5] * 100,
             'average': undefined,
             'baseVolume': ticker[length - 3],
             'quoteVolume': undefined,
@@ -318,16 +346,23 @@ module.exports = class bitfinex2 extends bitfinex {
 
     async fetchTickers (symbols = undefined, params = {}) {
         await this.loadMarkets ();
-        let tickers = await this.publicGetTickers (this.extend ({
-            'symbols': this.ids.join (','),
-        }, params));
+        let request = {};
+        if (symbols !== undefined) {
+            let ids = this.marketIds (symbols);
+            request['symbols'] = ids.join (',');
+        } else {
+            request['symbols'] = 'ALL';
+        }
+        let tickers = await this.publicGetTickers (this.extend (request, params));
         let result = {};
         for (let i = 0; i < tickers.length; i++) {
             let ticker = tickers[i];
             let id = ticker[0];
-            let market = this.markets_by_id[id];
-            let symbol = market['symbol'];
-            result[symbol] = this.parseTicker (ticker, market);
+            if (id in this.markets_by_id) {
+                let market = this.markets_by_id[id];
+                let symbol = market['symbol'];
+                result[symbol] = this.parseTicker (ticker, market);
+            }
         }
         return result;
     }
@@ -363,13 +398,16 @@ module.exports = class bitfinex2 extends bitfinex {
     async fetchTrades (symbol, since = undefined, limit = 120, params = {}) {
         await this.loadMarkets ();
         let market = this.market (symbol);
+        let sort = '-1';
         let request = {
             'symbol': market['id'],
-            'sort': '-1',
             'limit': limit, // default = max = 120
         };
-        if (typeof since !== 'undefined')
+        if (since !== undefined) {
             request['start'] = since;
+            sort = '1';
+        }
+        request['sort'] = sort;
         let response = await this.publicGetTradesSymbolHist (this.extend (request, params));
         let trades = this.sortBy (response, 1);
         return this.parseTrades (trades, market, undefined, limit);
@@ -378,8 +416,12 @@ module.exports = class bitfinex2 extends bitfinex {
     async fetchOHLCV (symbol, timeframe = '1m', since = undefined, limit = 100, params = {}) {
         await this.loadMarkets ();
         let market = this.market (symbol);
-        if (typeof since === 'undefined')
+        if (limit === undefined) {
+            limit = 100;
+        }
+        if (since === undefined) {
             since = this.milliseconds () - this.parseTimeframe (timeframe) * limit * 1000;
+        }
         let request = {
             'symbol': market['id'],
             'timeframe': this.timeframes[timeframe],
@@ -407,7 +449,7 @@ module.exports = class bitfinex2 extends bitfinex {
         throw new NotSupported (this.id + ' fetchDepositAddress() not implemented yet.');
     }
 
-    async withdraw (currency, amount, address, tag = undefined, params = {}) {
+    async withdraw (code, amount, address, tag = undefined, params = {}) {
         throw new NotSupported (this.id + ' withdraw not implemented yet');
     }
 
@@ -419,7 +461,7 @@ module.exports = class bitfinex2 extends bitfinex {
             'limit': limit,
             'end': this.seconds (),
         };
-        if (typeof since !== 'undefined')
+        if (since !== undefined)
             request['start'] = parseInt (since / 1000);
         let response = await this.privatePostAuthRTradesSymbolHist (this.extend (request, params));
         // return this.parseTrades (response, market, since, limit); // not implemented yet for bitfinex v2
@@ -472,5 +514,237 @@ module.exports = class bitfinex2 extends bitfinex {
             throw new ExchangeError (this.id + ' returned empty response');
         }
         return response;
+    }
+
+    _websocketOnMessage (contextId, data) {
+        let msg = JSON.parse (data);
+        // console.log(msg);
+        let event = this.safeString (msg, 'event');
+        if (typeof event !== 'undefined') {
+            if (event === 'subscribed') {
+                let channel = this.safeString (msg, 'channel');
+                if (channel === 'book') {
+                    this._websocketHandleSubscription (contextId, 'ob', msg);
+                }
+            } else if (event === 'unsubscribed') {
+                this._websocketHandleUnsubscription (contextId, msg);
+            } else if (event === 'error') {
+                this._websocketHandleError (contextId, msg);
+            }
+        } else {
+            // channel data
+            let chanId = msg[0];
+            let data = msg[1];
+            if (data === 'hb') {
+                // console.log ('heartbeat');
+                return;
+            }
+            let chanKey = '_' + chanId.toString ();
+            let channels = this._contextGet (contextId, 'channels');
+            if (!(chanKey in channels)) {
+                this.emit ('err', new ExchangeError (this.id + ' msg received from unregistered channels:' + chanId));
+                return;
+            }
+            let symbol = channels[chanKey]['symbol'];
+            let event = channels[chanKey]['event'];
+            if (event === 'ob') {
+                this._websocketHandleOrderBook (contextId, symbol, msg);
+            }
+        }
+    }
+
+    _websocketHandleError (contextId, msg) {
+        let channel = this.safeString (msg, 'channel');
+        let errorMsg = this.safeString (msg, 'msg');
+        let errorCode = this.safeString (msg, 'code');
+        let ex = new ExchangeError (this.id + ' ' + errorCode + ':' + errorMsg);
+        if (channel === 'book') {
+            let id = this.safeString (msg, 'symbol');
+            let symbol = this.findSymbol (id);
+            this._websocketProcessPendingNonces (contextId, 'sub-nonces', 'ob', symbol, false, ex);
+        }
+        this.emit ('err', ex, contextId);
+    }
+
+    _websocketHandleOrderBook (contextId, symbol, msg) {
+        let data = msg[1];
+        let firstElement = data[0];
+        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if (Array.isArray (firstElement)) {
+            // snapshot
+            symbolData['ob'] = {
+                'bids': [],
+                'asks': [],
+                'timestamp': undefined,
+                'datetime': undefined,
+                'nonce': undefined,
+            };
+            for (let i = 0; i < data.length; i++) {
+                let record = data[i];
+                let price = record[0];
+                let c = record[1];
+                let amount = record[2];
+                let side = undefined;
+                let isBid = undefined;
+                if (amount > 0) {
+                    side = 'bids';
+                    isBid = true;
+                } else {
+                    side = 'asks'
+                    isBid = false;
+                    amount = -amount;
+                }
+                if (c === 0) {
+                    // remove
+                    this.updateBidAsk ([price, 0], symbolData['ob'][side], isBid);
+                } else {
+                    // update
+                    this.updateBidAsk ([price, amount], symbolData['ob'][side], isBid);
+                }
+            }
+        } else {
+            // update
+            let price = data[0];
+            let c = data[1];
+            let amount = data[2];
+            let side = undefined;
+            let isBid = undefined;
+            if (amount > 0) {
+                side = 'bids';
+                isBid = true;
+            } else {
+                side = 'asks'
+                isBid = false;
+                amount = -amount;
+            }
+            if (c === 0) {
+                // remove
+                this.updateBidAsk ([price, 0], symbolData['ob'][side], isBid);
+            } else {
+                // update
+                this.updateBidAsk ([price, amount], symbolData['ob'][side], isBid);
+            }
+        }
+        this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit']));
+        this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+    }
+
+    _websocketProcessPendingNonces (contextId, nonceKey, event, symbol, success, ex) {
+        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        if (nonceKey in symbolData) {
+            let nonces = symbolData[nonceKey];
+            const keys = Object.keys (nonces);
+            for (let i = 0; i < keys.length; i++) {
+                let nonce = keys[i];
+                this._cancelTimeout (nonces[nonce]);
+                this.emit (nonce, success, ex);
+            }
+            symbolData[nonceKey] = {};
+            this._contextSetSymbolData (contextId, event, symbol, symbolData);
+        }
+    }
+
+    _websocketHandleSubscription (contextId, event, msg) {
+        let id = this.safeString (msg, 'symbol');
+        let symbol = this.findSymbol (id);
+        let channel = this.safeInteger (msg, 'chanId');
+        let chanKey = '_' + channel.toString ();
+        let channels = this._contextGet (contextId, 'channels');
+        if (typeof channels === 'undefined') {
+            channels = {};
+        }
+        channels[chanKey] = {
+            'response': msg,
+            'symbol': symbol,
+            'event': event,
+        };
+        this._contextSet (contextId, 'channels', channels);
+        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        symbolData['channelId'] = channel;
+        this._contextSetSymbolData (contextId, event, symbol, symbolData);
+        this._websocketProcessPendingNonces (contextId, 'sub-nonces', 'ob', symbol, true, undefined);
+    }
+
+    _websocketHandleUnsubscription (contextId, msg) {
+        let status = this.safeString (msg, 'status');
+        if (status === 'OK') {
+            let chanId = this.safeInteger (msg, 'chanId');
+            let chanKey = '_' + chanId.toString ();
+            let channels = this._contextGet (contextId, 'channels');
+            if (!(chanKey in channels)) {
+                this.emit ('err', new ExchangeError (this.id + ' msg received from unregistered channels:' + chanId));
+                return;
+            }
+            let symbol = channels[chanKey]['symbol'];
+            let event = channels[chanKey]['event'];
+            // remove channel ids ?
+            this.omit (channels, chanKey);
+            this._contextSet (contextId, 'channels', channels);
+            this._websocketProcessPendingNonces (contextId, 'unsub-nonces', event, symbol, true, undefined);
+        }
+    }
+
+    _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob') {
+            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        // save nonce for subscription response
+        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        if (!('sub-nonces' in symbolData)) {
+            symbolData['sub-nonces'] = {};
+        }
+        symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
+        let nonceStr = nonce.toString ();
+        let handle = this._setTimeout (this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        symbolData['sub-nonces'][nonceStr] = handle;
+        this._contextSetSymbolData (contextId, event, symbol, symbolData);
+        // send request
+        const id = this.marketId (symbol);
+        this.websocketSendJson ({
+            'event': 'subscribe',
+            'channel': 'book',
+            'symbol': id,
+            'prec': 'P0',
+            'freq': 'F0',
+            'len': '100',
+        });
+    }
+
+    _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob') {
+            throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        let payload = {
+            'event': 'unsubscribe',
+            'chanId': symbolData['channelId'],
+        };
+        if (!('unsub-nonces' in symbolData)) {
+            symbolData['unsub-nonces'] = {};
+        }
+        let nonceStr = nonce.toString ();
+        let handle = this._setTimeout (this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
+        symbolData['unsub-nonces'][nonceStr] = handle;
+        this._contextSetSymbolData (contextId, event, symbol, symbolData);
+        this.websocketSendJson (payload);
+    }
+
+    _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
+        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        if (key in symbolData) {
+            let nonces = symbolData[key];
+            if (timerNonce in nonces) {
+                this.omit (symbolData[key], timerNonce);
+                this._contextSetSymbolData (contextId, event, symbol, symbolData);
+            }
+        }
+    }
+
+    _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
+            return this._cloneOrderBook (data['ob'], limit);
+        }
+        return undefined;
     }
 };

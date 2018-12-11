@@ -7,7 +7,7 @@ use Clue;
 
 require __DIR__ . '/../../vendor/autoload.php';
 
-include 'WebsocketBaseConnection.php';
+require_once 'WebsocketBaseConnection.php';
 
 class WsEnvelop {
     public $ws;
@@ -60,6 +60,9 @@ class WebsocketConnection extends WebsocketBaseConnection {
                     $connector($that->options['url'])
                     ->then(function(Ratchet\Client\WebSocket $conn) use (&$that, &$client, &$resolve, &$reject){
                         $conn->on('message', function(\Ratchet\RFC6455\Messaging\MessageInterface $msg) use (&$that){
+                            if ($this->options['verbose']) {
+                                echo("WebsocketConnection: " .$msg."\n");
+                            }
                             if (!$that->client->is_closing) {
                                 $that->emit ('message', $msg);
                             }
@@ -92,7 +95,9 @@ class WebsocketConnection extends WebsocketBaseConnection {
                 
                         // $conn->send('Hello World!');
                     }, function(\Exception $e) use (&$that, &$reject, $client) {
-                        echo "Could not connect: {$e->getMessage()}\n";
+                        if ($this->options['verbose']) {
+                            echo "WebsocketConnection: Could not connect: {$e->getMessage()}\n";
+                        }
                         $client->connected = false;
                         $client->connected = false;
                         $reject($e);

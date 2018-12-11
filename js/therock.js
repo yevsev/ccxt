@@ -3,7 +3,7 @@
 //  ---------------------------------------------------------------------------
 
 const Exchange = require ('./base/Exchange');
-const { ExchangeError } = require ('./base/errors');
+const { ExchangeError, NotSupported } = require ('./base/errors');
 
 //  ---------------------------------------------------------------------------
 
@@ -12,7 +12,7 @@ module.exports = class therock extends Exchange {
         return this.deepExtend (super.describe (), {
             'id': 'therock',
             'name': 'TheRockTrading',
-            'countries': 'MT',
+            'countries': [ 'MT' ],
             'rateLimit': 1000,
             'version': 'v1',
             'has': {
@@ -31,6 +31,7 @@ module.exports = class therock extends Exchange {
             'api': {
                 'public': {
                     'get': [
+                        'funds',
                         'funds/{id}/orderbook',
                         'funds/{id}/ticker',
                         'funds/{id}/trades',
@@ -94,25 +95,106 @@ module.exports = class therock extends Exchange {
                     },
                 },
             },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'pusher',
+                        'baseurl': 'wss://ws-mt1.pusher.com/app/bb1fafdf79a00453b5af',
+                    },
+                },
+                'methodmap': {
+                    '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
+            },
         });
     }
 
     async fetchMarkets () {
-        let markets = await this.publicGetFundsTickers ();
+        let response = await this.publicGetFunds ();
+        //
+        //     { funds: [ {                      id:   "BTCEUR",
+        //                              description:   "Trade Bitcoin with Euro",
+        //                                     type:   "currency",
+        //                            base_currency:   "EUR",
+        //                           trade_currency:   "BTC",
+        //                                  buy_fee:    0.2,
+        //                                 sell_fee:    0.2,
+        //                      minimum_price_offer:    0.01,
+        //                   minimum_quantity_offer:    0.0005,
+        //                   base_currency_decimals:    2,
+        //                  trade_currency_decimals:    4,
+        //                                leverages: []                           },
+        //                {                      id:   "LTCEUR",
+        //                              description:   "Trade Litecoin with Euro",
+        //                                     type:   "currency",
+        //                            base_currency:   "EUR",
+        //                           trade_currency:   "LTC",
+        //                                  buy_fee:    0.2,
+        //                                 sell_fee:    0.2,
+        //                      minimum_price_offer:    0.01,
+        //                   minimum_quantity_offer:    0.01,
+        //                   base_currency_decimals:    2,
+        //                  trade_currency_decimals:    2,
+        //                                leverages: []                            } ] }
+        //
+        let markets = this.safeValue (response, 'funds');
         let result = [];
-        for (let p = 0; p < markets['tickers'].length; p++) {
-            let market = markets['tickers'][p];
-            let id = market['fund_id'];
-            let base = id.slice (0, 3);
-            let quote = id.slice (3);
-            let symbol = base + '/' + quote;
-            result.push ({
-                'id': id,
-                'symbol': symbol,
-                'base': base,
-                'quote': quote,
-                'info': market,
-            });
+        if (markets === undefined) {
+            throw new ExchangeError (this.id + ' fetchMarkets got an unexpected response');
+        } else {
+            for (let i = 0; i < markets.length; i++) {
+                let market = markets[i];
+                let id = this.safeString (market, 'id');
+                let baseId = this.safeString (market, 'trade_currency');
+                let quoteId = this.safeString (market, 'base_currency');
+                let base = this.commonCurrencyCode (baseId);
+                let quote = this.commonCurrencyCode (quoteId);
+                let symbol = base + '/' + quote;
+                let buy_fee = this.safeFloat (market, 'buy_fee');
+                let sell_fee = this.safeFloat (market, 'sell_fee');
+                let taker = Math.max (buy_fee, sell_fee);
+                taker = taker / 100;
+                let maker = taker;
+                result.push ({
+                    'id': id,
+                    'symbol': symbol,
+                    'base': base,
+                    'quote': quote,
+                    'baseId': baseId,
+                    'quoteId': quoteId,
+                    'info': market,
+                    'active': true,
+                    'maker': maker,
+                    'taker': taker,
+                    'precision': {
+                        'amount': this.safeInteger (market, 'trade_currency_decimals'),
+                        'price': this.safeInteger (market, 'base_currency_decimals'),
+                    },
+                    'limits': {
+                        'amount': {
+                            'min': this.safeFloat (market, 'minimum_quantity_offer'),
+                            'max': undefined,
+                        },
+                        'price': {
+                            'min': this.safeFloat (market, 'minimum_price_offer'),
+                            'max': undefined,
+                        },
+                        'cost': {
+                            'min': undefined,
+                            'max': undefined,
+                        },
+                    },
+                });
+            }
         }
         return result;
     }
@@ -249,7 +331,19 @@ module.exports = class therock extends Exchange {
         await this.loadMarkets ();
         return await this.privateDeleteFundsFundIdOrdersId (this.extend ({
             'id': id,
+            'fund_id': this.marketId (symbol),
         }, params));
+    }
+
+    parseOrderStatus (status) {
+        const statuses = {
+            'active': 'open',
+            'executed': 'closed',
+            'deleted': 'canceled',
+            // don't know what this status means
+            // 'conditional': '?',
+        };
+        return this.safeString (statuses, status, status);
     }
 
     sign (path, api = 'public', method = 'GET', params = {}, headers = undefined, body = undefined) {
@@ -277,5 +371,159 @@ module.exports = class therock extends Exchange {
         if ('errors' in response)
             throw new ExchangeError (this.id + ' ' + this.json (response));
         return response;
+    }
+
+    _websocketOnMessage (contextId, data) {
+        let msg = JSON.parse (data);
+        // console.log(data);
+        this._websocketCheckSequence (contextId, msg);
+        let evt = this.safeString (msg, 'event');
+        if (evt === 'subscription_succeeded') {
+            this._websocketHandleSubscription (contextId, msg);
+        } else if (evt === 'orderbook') {
+            this._websocketHandleOrderbook (contextId, msg);
+        } else if (evt === 'orderbook_diff') {
+            this._websocketHandleOrderbookDiff (contextId, msg);
+        }
+    }
+
+    _websocketCheckSequence (contextId, msg) {
+        let msgData = this.safeValue (msg, 'data');
+        if (typeof msgData === 'undefined') {
+            return;
+        }
+        let sequeceId = this.safeInteger (msgData, 'sequence');
+        if (typeof sequeceId === 'undefined') {
+            return;
+        }
+        let chan = this.safeString (msg, 'channel');
+        let lastSeqIdData = this._contextGet (contextId, 'sequence');
+        if (typeof lastSeqIdData === 'undefined') {
+            lastSeqIdData = {};
+        }
+        if (chan in lastSeqIdData) {
+            let lastSeqId = lastSeqIdData[chan];
+            lastSeqId = this.sum (lastSeqId, 1);
+            if (sequeceId !== lastSeqId) {
+                this.emit ('err', 'sequence error in pusher connection ' + sequeceId + ' !== ' + lastSeqId, contextId);
+                return;
+            }
+        }
+        lastSeqIdData[chan] = sequeceId;
+        this._contextSet (contextId, 'sequence', lastSeqIdData);
+    }
+
+    _websocketHandleOrderbook (contextId, msg) {
+        let chan = this.safeString (msg, 'channel');
+        let symbol = this.findSymbol (chan);
+        let data = this.safeValue (msg, 'data');
+        let time = this.safeString (data, 'time');
+        let timestamp = this.parse8601 (time);
+        let ob = this.parseOrderBook (data, timestamp, 'bids', 'asks', 'price', 'amount');
+        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        symbolData['ob'] = ob;
+        this.emit ('ob', symbol, this._cloneOrderBook (ob, symbolData['limit']));
+        this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+    }
+
+    _websocketHandleOrderbookDiff (contextId, msg) {
+        let chan = this.safeString (msg, 'channel');
+        let symbol = this.findSymbol (chan);
+        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if (!('ob' in symbolData)) {
+            // not previous snapshot -> don't process it
+            return;
+        }
+        let data = this.safeValue (msg, 'data');
+        let time = this.safeString (data, 'time');
+        let timestamp = this.parse8601 (time);
+        let price = this.safeFloat (data, 'price');
+        let amount = this.safeFloat (data, 'amount');
+        let side = this.safeString (data, 'side');
+        side = (side === 'bid') ? 'bids' : 'asks';
+        this.updateBidAsk ([price, amount], symbolData['ob'][side], side === 'bids');
+        symbolData['ob']['timestamp'] = timestamp;
+        symbolData['ob']['datetime'] = this.iso8601 (timestamp);
+        this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit']));
+        this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+    }
+
+    _websocketHandleSubscription (contextId, msg) {
+        let chan = this.safeString (msg, 'channel');
+        let event = 'ob';
+        if (chan === 'currency') {
+            event = 'trade';
+        }
+        let symbol = this.findSymbol (chan);
+        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        if ('sub-nonces' in symbolData) {
+            let nonces = symbolData['sub-nonces'];
+            const keys = Object.keys (nonces);
+            for (let i = 0; i < keys.length; i++) {
+                let nonce = keys[i];
+                this._cancelTimeout (nonces[nonce]);
+                this.emit (nonce, true);
+            }
+            symbolData['sub-nonces'] = {};
+            this._contextSetSymbolData (contextId, event, symbol, symbolData);
+        }
+    }
+
+    _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob') {
+            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        // save nonce for subscription response
+        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        if (!('sub-nonces' in symbolData)) {
+            symbolData['sub-nonces'] = {};
+        }
+        symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
+        let nonceStr = nonce.toString ();
+        let handle = this._setTimeout (this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        symbolData['sub-nonces'][nonceStr] = handle;
+        this._contextSetSymbolData (contextId, event, symbol, symbolData);
+        // remove sequenceId
+        let sequenceId = undefined;
+        this._contextSet (contextId, 'sequence', sequenceId);
+        // send request
+        const id = this.marketId (symbol);
+        this.websocketSendJson ({
+            'event': 'subscribe',
+            'channel': id,
+        }, contextId);
+    }
+
+    _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob') {
+            throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        let id = this.market_id (symbol);
+        let payload = {
+            'event': 'unsubscribe',
+            'channel': id,
+        };
+        let nonceStr = nonce.toString ();
+        this.websocketSendJson (payload);
+        this.emit (nonceStr, true);
+    }
+
+    _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
+        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        if (key in symbolData) {
+            let nonces = symbolData[key];
+            if (timerNonce in nonces) {
+                this.omit (symbolData[key], timerNonce);
+                this._contextSetSymbolData (contextId, event, symbol, symbolData);
+            }
+        }
+    }
+
+    _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
+            return this._cloneOrderBook (data['ob'], limit);
+        }
+        return undefined;
     }
 };

@@ -3,7 +3,7 @@
 //  ---------------------------------------------------------------------------
 
 const Exchange = require ('./base/Exchange');
-const { ExchangeError, ExchangeNotAvailable, RequestTimeout, AuthenticationError, DDoSProtection, InsufficientFunds, OrderNotFound, OrderNotCached, InvalidOrder, AccountSuspended, CancelPending, InvalidNonce } = require ('./base/errors');
+const { ExchangeError, ExchangeNotAvailable, RequestTimeout, AuthenticationError, PermissionDenied, DDoSProtection, InsufficientFunds, OrderNotFound, OrderNotCached, InvalidOrder, AccountSuspended, CancelPending, InvalidNonce, NotSupported } = require ('./base/errors');
 
 //  ---------------------------------------------------------------------------
 
@@ -12,7 +12,7 @@ module.exports = class poloniex extends Exchange {
         return this.deepExtend (super.describe (), {
             'id': 'poloniex',
             'name': 'Poloniex',
-            'countries': 'US',
+            'countries': [ 'US' ],
             'rateLimit': 1000, // up to 6 calls per second
             'has': {
                 'createDepositAddress': true,
@@ -21,7 +21,9 @@ module.exports = class poloniex extends Exchange {
                 'editOrder': true,
                 'createMarketOrder': false,
                 'fetchOHLCV': true,
+                'fetchOrderTrades': true,
                 'fetchMyTrades': true,
+                'fetchOrderBooks': true,
                 'fetchOrder': 'emulated',
                 'fetchOrders': 'emulated',
                 'fetchOpenOrders': true,
@@ -30,6 +32,9 @@ module.exports = class poloniex extends Exchange {
                 'fetchTradingFees': true,
                 'fetchCurrencies': true,
                 'withdraw': true,
+                'fetchTransactions': true,
+                'fetchWithdrawals': 'emulated', // but almost true )
+                'fetchDeposits': 'emulated',
             },
             'timeframes': {
                 '5m': 300,
@@ -97,10 +102,29 @@ module.exports = class poloniex extends Exchange {
                     ],
                 },
             },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://api2.poloniex.com',
+                    },
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
+            },
+            // Fees are tier-based. More info: https://poloniex.com/fees/
+            // Rates below are highest possible.
             'fees': {
                 'trading': {
-                    'maker': 0.0015,
-                    'taker': 0.0025,
+                    'maker': 0.001,
+                    'taker': 0.002,
                 },
                 'funding': {},
             },
@@ -123,9 +147,21 @@ module.exports = class poloniex extends Exchange {
                 'price': 8,
             },
             'commonCurrencies': {
-                'BTM': 'Bitmark',
-                'STR': 'XLM',
+                'AIR': 'AirCoin',
+                'APH': 'AphroditeCoin',
                 'BCC': 'BTCtalkcoin',
+                'BDG': 'Badgercoin',
+                'BTM': 'Bitmark',
+                'CON': 'Coino',
+                'GOLD': 'GoldEagles',
+                'GPUC': 'GPU',
+                'HOT': 'Hotcoin',
+                'ITC': 'Information Coin',
+                'PLX': 'ParallaxCoin',
+                'KEY': 'KEYCoin',
+                'STR': 'XLM',
+                'SOC': 'SOCC',
+                'XAP': 'API Coin',
             },
             'options': {
                 'limits': {
@@ -137,6 +173,27 @@ module.exports = class poloniex extends Exchange {
                             'USDT': 1.0,
                         },
                     },
+                },
+            },
+            'exceptions': {
+                'exact': {
+                    'You may only place orders that reduce your position.': InvalidOrder,
+                    'Invalid order number, or you are not the person who placed the order.': OrderNotFound,
+                    'Permission denied': PermissionDenied,
+                    'Connection timed out. Please try again.': RequestTimeout,
+                    'Internal error. Please try again.': ExchangeNotAvailable,
+                    'Order not found, or you are not the person who placed it.': OrderNotFound,
+                    'Invalid API key/secret pair.': AuthenticationError,
+                    'Please do not make more than 8 API calls per second.': DDoSProtection,
+                    'Rate must be greater than zero.': InvalidOrder, // {"error":"Rate must be greater than zero."}
+                },
+                'broad': {
+                    'Total must be at least': InvalidOrder, // {"error":"Total must be at least 0.0001."}
+                    'This account is frozen.': AccountSuspended,
+                    'Not enough': InsufficientFunds,
+                    'Nonce must be greater': InvalidNonce,
+                    'You have already called cancelOrder or moveOrder on this order.': CancelPending,
+                    'Amount must be at least': InvalidOrder, // {"error":"Amount must be at least 0.000001."}
                 },
             },
         });
@@ -174,17 +231,130 @@ module.exports = class poloniex extends Exchange {
     async fetchOHLCV (symbol, timeframe = '5m', since = undefined, limit = undefined, params = {}) {
         await this.loadMarkets ();
         let market = this.market (symbol);
-        if (!since)
+        if (since === undefined)
             since = 0;
         let request = {
             'currencyPair': market['id'],
             'period': this.timeframes[timeframe],
             'start': parseInt (since / 1000),
         };
-        if (typeof limit !== 'undefined')
+        if (limit !== undefined)
             request['end'] = this.sum (request['start'], limit * this.timeframes[timeframe]);
         let response = await this.publicGetReturnChartData (this.extend (request, params));
         return this.parseOHLCVs (response, market, timeframe, since, limit);
+    }
+
+    findMarket (string) {
+        if (typeof this.markets === 'undefined') {
+            throw new ExchangeError (this.id + ' markets not loaded');
+        }
+        // let isNumeric = '/^\d+$/'.test(string);
+        // cannot transpile Number
+        // let isNumeric = !Number.isNaN ( parseInt (string) );
+        // let isNumeric = parseInt (string).toString () === 'NaN';
+        let isNumeric = true;
+        if (string.toString () !== string) {
+            string = string.toString ();
+        }
+        let i = 0;
+        for (i = 0; i < string.length; i++) {
+            let c = string[i];
+            if (c === '0') {
+                continue;
+            }
+            if (c === '1') {
+                continue;
+            }
+            if (c === '2') {
+                continue;
+            }
+            if (c === '3') {
+                continue;
+            }
+            if (c === '4') {
+                continue;
+            }
+            if (c === '5') {
+                continue;
+            }
+            if (c === '6') {
+                continue;
+            }
+            if (c === '7') {
+                continue;
+            }
+            if (c === '8') {
+                continue;
+            }
+            if (c === '9') {
+                continue;
+            }
+            isNumeric = false;
+            break;
+        }
+        if (isNumeric === true) {
+            if (string in this.markets_by_id2) {
+                return this.markets_by_id2[string];
+            }
+        } else if (typeof string === 'string') {
+            if (string in this.markets_by_id) {
+                return this.markets_by_id[string];
+            }
+            if (string in this.markets) {
+                return this.markets[string];
+            }
+        }
+        return string;
+    }
+
+    setMarkets (markets, currencies = undefined) {
+        // Poloniex uses an additional index for its curreny pairs
+        // id2 is string containing only numeric chars
+        // Calling super.setMArkets does not transpile...
+        this.marketsById2 = this.indexBy (markets, 'id2');
+        this.markets_by_id2 = this.marketsById2;
+        return super.setMarkets (markets, currencies);
+        // Cannot use map
+        // let values = Object.values (markets).map (market => this.deepExtend ({
+        //     'limits': this.limits,
+        //     'precision': this.precision,
+        // }, this.fees['trading'], market))
+        // this.marketsById2 = this.indexBy (markets, 'id2');
+        // this.markets_by_id2 = this.marketsById2;
+        // this.markets = this.deepExtend (this.markets, this.indexBy (values, 'symbol'))
+        // this.marketsById = this.indexBy (markets, 'id')
+        // this.markets_by_id = this.marketsById
+        // this.symbols = Object.keys (this.markets).sort ()
+        // this.ids = Object.keys (this.markets_by_id).sort ()
+        // if (currencies) {
+        //     this.currencies = this.deepExtend (currencies, this.currencies)
+        // } else {
+        //     const baseCurrencies =
+        //         values.filter (market => 'base' in market)
+        //             .map (market => ({
+        //                 id: market.baseId || market.base,
+        //                 numericId: (typeof market.baseNumericId !== 'undefined') ? market.baseNumericId : undefined,
+        //                 code: market.base,
+        //                 precision: market.precision ? (market.precision.base || market.precision.amount) : 8,
+        //             }))
+        //     const quoteCurrencies =
+        //         values.filter (market => 'quote' in market)
+        //             .map (market => ({
+        //                 id: market.quoteId || market.quote,
+        //                 numericId: (typeof market.quoteNumericId !== 'undefined') ? market.quoteNumericId : undefined,
+        //                 code: market.quote,
+        //                 precision: market.precision ? (market.precision.quote || market.precision.price) : 8,
+        //             }))
+        //     const allCurrencies = baseCurrencies.concat (quoteCurrencies)
+        //     const groupedCurrencies = this.groupBy (allCurrencies, 'code')
+        //     const currencies = Object.keys (groupedCurrencies).map (code =>
+        //         groupedCurrencies[code].reduce ((previous, current) =>
+        //             ((previous.precision > current.precision) ? previous : current), groupedCurrencies[code][0]))
+        //     const sortedCurrencies = this.sortBy (flatten (currencies), 'code')
+        //     this.currencies = this.deepExtend (this.indexBy (sortedCurrencies, 'code'), this.currencies)
+        // }
+        // this.currencies_by_id = this.indexBy (this.currencies, 'id')
+        // return this.markets
     }
 
     async fetchMarkets () {
@@ -194,33 +364,36 @@ module.exports = class poloniex extends Exchange {
         for (let p = 0; p < keys.length; p++) {
             let id = keys[p];
             let market = markets[id];
+            // let id2 = market['id'].toString ();
             let [ quote, base ] = id.split ('_');
             base = this.commonCurrencyCode (base);
             quote = this.commonCurrencyCode (quote);
             let symbol = base + '/' + quote;
             let minCost = this.safeFloat (this.options['limits']['cost']['min'], quote, 0.0);
+            let precision = {
+                'amount': 6,
+                'price': 8,
+            };
             result.push (this.extend (this.fees['trading'], {
                 'id': id,
+                'id2': market['id'].toString (),
                 'symbol': symbol,
                 'base': base,
                 'quote': quote,
                 'active': true,
-                'precision': {
-                    'amount': 8,
-                    'price': 8,
-                },
+                'precision': precision,
                 'limits': {
                     'amount': {
-                        'min': 0.00000001,
-                        'max': 1000000000,
+                        'min': Math.pow (10, -precision['amount']),
+                        'max': undefined,
                     },
                     'price': {
-                        'min': 0.00000001,
-                        'max': 1000000000,
+                        'min': Math.pow (10, -precision['price']),
+                        'max': undefined,
                     },
                     'cost': {
                         'min': minCost,
-                        'max': 1000000000,
+                        'max': undefined,
                     },
                 },
                 'info': market,
@@ -268,12 +441,44 @@ module.exports = class poloniex extends Exchange {
         let request = {
             'currencyPair': this.marketId (symbol),
         };
-        if (typeof limit !== 'undefined')
+        if (limit !== undefined) {
             request['depth'] = limit; // 100
+        }
         let response = await this.publicGetReturnOrderBook (this.extend (request, params));
         let orderbook = this.parseOrderBook (response);
-        orderbook['nonce'] = this.safeInteger (response, 'sec');
+        orderbook['nonce'] = this.safeInteger (response, 'seq');
         return orderbook;
+    }
+
+    async fetchOrderBooks (symbols = undefined, params = {}) {
+        await this.loadMarkets ();
+        let request = {
+            'currencyPair': 'all',
+        };
+        //
+        //     if (limit !== undefined) {
+        //         request['depth'] = limit; // 100
+        //     }
+        //
+        let response = await this.publicGetReturnOrderBook (this.extend (request, params));
+        let marketIds = Object.keys (response);
+        let result = {};
+        for (let i = 0; i < marketIds.length; i++) {
+            let marketId = marketIds[i];
+            let symbol = undefined;
+            if (marketId in this.markets_by_id) {
+                symbol = this.markets_by_id[marketId]['symbol'];
+            } else {
+                let [ quoteId, baseId ] = marketId.split ('_');
+                let base = this.commonCurrencyCode (baseId);
+                let quote = this.commonCurrencyCode (quoteId);
+                symbol = base + '/' + quote;
+            }
+            let orderbook = this.parseOrderBook (response[marketId]);
+            orderbook['nonce'] = this.safeInteger (response[marketId], 'seq');
+            result[symbol] = orderbook;
+        }
+        return result;
     }
 
     parseTicker (ticker, market = undefined) {
@@ -322,8 +527,18 @@ module.exports = class poloniex extends Exchange {
         let result = {};
         for (let i = 0; i < ids.length; i++) {
             let id = ids[i];
-            let market = this.markets_by_id[id];
-            let symbol = market['symbol'];
+            let symbol = undefined;
+            let market = undefined;
+            if (id in this.markets_by_id) {
+                let market = this.markets_by_id[id];
+                symbol = market['symbol'];
+            } else {
+                let [ quoteId, baseId ] = id.split ('_');
+                let base = this.commonCurrencyCode (baseId);
+                let quote = this.commonCurrencyCode (quoteId);
+                symbol = base + '/' + quote;
+                market = { 'symbol': symbol };
+            }
             let ticker = tickers[id];
             result[symbol] = this.parseTicker (ticker, market);
         }
@@ -342,17 +557,13 @@ module.exports = class poloniex extends Exchange {
             // differentiated fees for each particular method
             let precision = 8; // default precision, todo: fix "magic constants"
             let code = this.commonCurrencyCode (id);
-            let active = (currency['delisted'] === 0);
-            let status = (currency['disabled']) ? 'disabled' : 'ok';
-            if (status !== 'ok')
-                active = false;
+            let active = (currency['delisted'] === 0) && !currency['disabled'];
             result[code] = {
                 'id': id,
                 'code': code,
                 'info': currency,
                 'name': currency['name'],
                 'active': active,
-                'status': status,
                 'fee': this.safeFloat (currency, 'txFee'), // todo: redesign
                 'precision': precision,
                 'limits': {
@@ -402,7 +613,7 @@ module.exports = class poloniex extends Exchange {
                 symbol = base + '/' + quote;
             }
         }
-        if (market) {
+        if (market !== undefined) {
             symbol = market['symbol'];
             base = market['base'];
             quote = market['quote'];
@@ -420,7 +631,7 @@ module.exports = class poloniex extends Exchange {
                 feeCost = amount * rate;
             } else {
                 currency = quote;
-                if (typeof cost !== 'undefined')
+                if (cost !== undefined)
                     feeCost = cost * rate;
             }
             fee = {
@@ -452,7 +663,7 @@ module.exports = class poloniex extends Exchange {
         let request = {
             'currencyPair': market['id'],
         };
-        if (typeof since !== 'undefined') {
+        if (since !== undefined) {
             request['start'] = parseInt (since / 1000);
             request['end'] = this.seconds (); // last 50000 trades by default
         }
@@ -463,20 +674,20 @@ module.exports = class poloniex extends Exchange {
     async fetchMyTrades (symbol = undefined, since = undefined, limit = undefined, params = {}) {
         await this.loadMarkets ();
         let market = undefined;
-        if (symbol)
+        if (symbol !== undefined)
             market = this.market (symbol);
         let pair = market ? market['id'] : 'all';
         let request = { 'currencyPair': pair };
-        if (typeof since !== 'undefined') {
+        if (since !== undefined) {
             request['start'] = parseInt (since / 1000);
-            request['end'] = this.seconds ();
+            request['end'] = this.seconds () + 1; // adding 1 is a fix for #3411
         }
         // limit is disabled (does not really work as expected)
-        if (limit)
+        if (limit !== undefined)
             request['limit'] = parseInt (limit);
         let response = await this.privatePostReturnTradeHistory (this.extend (request, params));
         let result = [];
-        if (market) {
+        if (market !== undefined) {
             result = this.parseTrades (response, market);
         } else {
             if (response) {
@@ -484,11 +695,23 @@ module.exports = class poloniex extends Exchange {
                 for (let i = 0; i < ids.length; i++) {
                     let id = ids[i];
                     let market = undefined;
-                    if (id in this.markets_by_id)
+                    if (id in this.markets_by_id) {
                         market = this.markets_by_id[id];
-                    let trades = this.parseTrades (response[id], market);
-                    for (let j = 0; j < trades.length; j++) {
-                        result.push (trades[j]);
+                        let trades = this.parseTrades (response[id], market);
+                        for (let j = 0; j < trades.length; j++) {
+                            result.push (trades[j]);
+                        }
+                    } else {
+                        let [ baseId, quoteId ] = id.split ('_');
+                        let base = this.commonCurrencyCode (baseId);
+                        let quote = this.commonCurrencyCode (quoteId);
+                        let symbol = base + '/' + quote;
+                        let trades = response[id];
+                        for (let j = 0; j < trades.length; j++) {
+                            result.push (this.extend (this.parseTrade (trades[j]), {
+                                'symbol': symbol,
+                            }));
+                        }
                     }
                 }
             }
@@ -511,15 +734,15 @@ module.exports = class poloniex extends Exchange {
         let amount = this.safeFloat (order, 'startingAmount', remaining);
         let filled = undefined;
         let cost = 0;
-        if (typeof amount !== 'undefined') {
-            if (typeof remaining !== 'undefined') {
+        if (amount !== undefined) {
+            if (remaining !== undefined) {
                 filled = amount - remaining;
-                if (typeof price !== 'undefined')
+                if (price !== undefined)
                     cost = filled * price;
             }
         }
-        if (typeof filled === 'undefined') {
-            if (typeof trades !== 'undefined') {
+        if (filled === undefined) {
+            if (trades !== undefined) {
                 filled = 0;
                 cost = 0;
                 for (let i = 0; i < trades.length; i++) {
@@ -551,7 +774,7 @@ module.exports = class poloniex extends Exchange {
         };
     }
 
-    parseOpenOrders (orders, market, result = []) {
+    parseOpenOrders (orders, market, result) {
         for (let i = 0; i < orders.length; i++) {
             let order = orders[i];
             let extended = this.extend (order, {
@@ -568,14 +791,14 @@ module.exports = class poloniex extends Exchange {
     async fetchOrders (symbol = undefined, since = undefined, limit = undefined, params = {}) {
         await this.loadMarkets ();
         let market = undefined;
-        if (symbol)
+        if (symbol !== undefined)
             market = this.market (symbol);
         let pair = market ? market['id'] : 'all';
         let response = await this.privatePostReturnOpenOrders (this.extend ({
             'currencyPair': pair,
         }));
         let openOrders = [];
-        if (market) {
+        if (market !== undefined) {
             openOrders = this.parseOpenOrders (response, market, openOrders);
         } else {
             let marketIds = Object.keys (response);
@@ -605,15 +828,15 @@ module.exports = class poloniex extends Exchange {
                         'filled': order['amount'],
                         'remaining': 0.0,
                     });
-                    if (typeof order['cost'] === 'undefined') {
-                        if (typeof order['filled'] !== 'undefined')
+                    if (order['cost'] === undefined) {
+                        if (order['filled'] !== undefined)
                             order['cost'] = order['filled'] * order['price'];
                     }
                     this.orders[id] = order;
                 }
             }
             let order = this.orders[id];
-            if (market) {
+            if (market !== undefined) {
                 if (order['symbol'] === symbol)
                     result.push (order);
             } else {
@@ -660,13 +883,12 @@ module.exports = class poloniex extends Exchange {
         await this.loadMarkets ();
         let method = 'privatePost' + this.capitalize (side);
         let market = this.market (symbol);
-        price = parseFloat (price);
-        amount = parseFloat (amount);
-        let response = await this[method] (this.extend ({
+        let request = {
             'currencyPair': market['id'],
             'rate': this.priceToPrecision (symbol, price),
             'amount': this.amountToPrecision (symbol, amount),
-        }, params));
+        };
+        let response = await this[method] (this.extend (request, params));
         let timestamp = this.milliseconds ();
         let order = this.parseOrder (this.extend ({
             'timestamp': timestamp,
@@ -688,8 +910,7 @@ module.exports = class poloniex extends Exchange {
             'orderNumber': id,
             'rate': this.priceToPrecision (symbol, price),
         };
-        if (typeof amount !== 'undefined') {
-            amount = parseFloat (amount);
+        if (amount !== undefined) {
             request['amount'] = this.amountToPrecision (symbol, amount);
         }
         let response = await this.privatePostMoveOrder (this.extend (request, params));
@@ -702,12 +923,12 @@ module.exports = class poloniex extends Exchange {
                 'price': price,
                 'status': 'open',
             });
-            if (typeof amount !== 'undefined')
+            if (amount !== undefined)
                 this.orders[newid]['amount'] = amount;
             result = this.extend (this.orders[newid], { 'info': response });
         } else {
             let market = undefined;
-            if (symbol)
+            if (symbol !== undefined)
                 market = this.market (symbol);
             result = this.parseOrder (response, market);
             this.orders[result['id']] = result;
@@ -744,14 +965,14 @@ module.exports = class poloniex extends Exchange {
         return response;
     }
 
-    async fetchOrderStatus (id, symbol = undefined) {
+    async fetchOrderStatus (id, symbol = undefined, params = {}) {
         await this.loadMarkets ();
-        let orders = await this.fetchOpenOrders (symbol);
+        let orders = await this.fetchOpenOrders (symbol, undefined, undefined, params);
         let indexed = this.indexBy (orders, 'id');
         return (id in indexed) ? 'open' : 'closed';
     }
 
-    async fetchOrderTrades (id, symbol = undefined, params = {}) {
+    async fetchOrderTrades (id, symbol = undefined, since = undefined, limit = undefined, params = {}) {
         await this.loadMarkets ();
         let trades = await this.privatePostReturnOrderTrades (this.extend ({
             'orderNumber': id,
@@ -760,33 +981,46 @@ module.exports = class poloniex extends Exchange {
     }
 
     async createDepositAddress (code, params = {}) {
+        await this.loadMarkets ();
         let currency = this.currency (code);
         let response = await this.privatePostGenerateNewAddress ({
             'currency': currency['id'],
         });
         let address = undefined;
+        let tag = undefined;
         if (response['success'] === 1)
             address = this.safeString (response, 'response');
         this.checkAddress (address);
+        const depositAddress = this.safeString (currency['info'], 'depositAddress');
+        if (depositAddress !== undefined) {
+            tag = address;
+            address = depositAddress;
+        }
         return {
             'currency': code,
             'address': address,
-            'status': 'ok',
+            'tag': tag,
             'info': response,
         };
     }
 
     async fetchDepositAddress (code, params = {}) {
+        await this.loadMarkets ();
         let currency = this.currency (code);
         let response = await this.privatePostReturnDepositAddresses ();
         let currencyId = currency['id'];
         let address = this.safeString (response, currencyId);
+        let tag = undefined;
         this.checkAddress (address);
-        let status = address ? 'ok' : 'none';
+        const depositAddress = this.safeString (currency['info'], 'depositAddress');
+        if (depositAddress !== undefined) {
+            tag = address;
+            address = depositAddress;
+        }
         return {
             'currency': code,
             'address': address,
-            'status': status,
+            'tag': tag,
             'info': response,
         };
     }
@@ -806,6 +1040,180 @@ module.exports = class poloniex extends Exchange {
         return {
             'info': result,
             'id': result['response'],
+        };
+    }
+
+    async fetchTransactionsHelper (code = undefined, since = undefined, limit = undefined, params = {}) {
+        await this.loadMarkets ();
+        const year = 31104000; // 60 * 60 * 24 * 30 * 12 = one year of history, why not
+        const now = this.seconds ();
+        let start = (since !== undefined) ? parseInt (since / 1000) : now - year;
+        let request = {
+            'start': start, // UNIX timestamp, required
+            'end': now, // UNIX timestamp, required
+        };
+        if (limit !== undefined)
+            request['limit'] = limit;
+        let response = await this.privatePostReturnDepositsWithdrawals (this.extend (request, params));
+        //
+        //     {    deposits: [ {      currency: "BTC",
+        //                              address: "1MEtiqJWru53FhhHrfJPPvd2tC3TPDVcmW",
+        //                               amount: "0.01063000",
+        //                        confirmations:  1,
+        //                                 txid: "952b0e1888d6d491591facc0d37b5ebec540ac1efb241fdbc22bcc20d1822fb6",
+        //                            timestamp:  1507916888,
+        //                               status: "COMPLETE"                                                          },
+        //                      {      currency: "ETH",
+        //                              address: "0x20108ba20b65c04d82909e91df06618107460197",
+        //                               amount: "4.00000000",
+        //                        confirmations:  38,
+        //                                 txid: "0x4be260073491fe63935e9e0da42bd71138fdeb803732f41501015a2d46eb479d",
+        //                            timestamp:  1525060430,
+        //                               status: "COMPLETE"                                                            }  ],
+        //       withdrawals: [ { withdrawalNumber:  8224394,
+        //                                currency: "EMC2",
+        //                                 address: "EYEKyCrqTNmVCpdDV8w49XvSKRP9N3EUyF",
+        //                                  amount: "63.10796020",
+        //                                     fee: "0.01000000",
+        //                               timestamp:  1510819838,
+        //                                  status: "COMPLETE: d37354f9d02cb24d98c8c4fc17aa42f475530b5727effdf668ee5a43ce667fd6",
+        //                               ipAddress: "5.220.220.200"                                                               },
+        //                      { withdrawalNumber:  9290444,
+        //                                currency: "ETH",
+        //                                 address: "0x191015ff2e75261d50433fbd05bd57e942336149",
+        //                                  amount: "0.15500000",
+        //                                     fee: "0.00500000",
+        //                               timestamp:  1514099289,
+        //                                  status: "COMPLETE: 0x12d444493b4bca668992021fd9e54b5292b8e71d9927af1f076f554e4bea5b2d",
+        //                               ipAddress: "5.228.227.214"                                                                 },
+        //                      { withdrawalNumber:  11518260,
+        //                                currency: "BTC",
+        //                                 address: "8JoDXAmE1GY2LRK8jD1gmAmgRPq54kXJ4t",
+        //                                  amount: "0.20000000",
+        //                                     fee: "0.00050000",
+        //                               timestamp:  1527918155,
+        //                                  status: "COMPLETE: 1864f4ebb277d90b0b1ff53259b36b97fa1990edc7ad2be47c5e0ab41916b5ff",
+        //                               ipAddress: "211.8.195.26"                                                                }    ] }
+        //
+        return response;
+    }
+
+    async fetchTransactions (code = undefined, since = undefined, limit = undefined, params = {}) {
+        let response = await this.fetchTransactionsHelper (code, since, limit, params);
+        for (let i = 0; i < response['deposits'].length; i++) {
+            response['deposits'][i]['type'] = 'deposit';
+        }
+        for (let i = 0; i < response['withdrawals'].length; i++) {
+            response['withdrawals'][i]['type'] = 'withdrawal';
+        }
+        let withdrawals = this.parseTransactions (response['withdrawals'], code, since, limit);
+        let deposits = this.parseTransactions (response['deposits'], code, since, limit);
+        let transactions = this.arrayConcat (deposits, withdrawals);
+        return this.filterByCurrencySinceLimit (this.sortBy (transactions, 'timestamp'), code, since, limit);
+    }
+
+    async fetchWithdrawals (code = undefined, since = undefined, limit = undefined, params = {}) {
+        let response = await this.fetchTransactionsHelper (code, since, limit, params);
+        for (let i = 0; i < response['withdrawals'].length; i++) {
+            response['withdrawals'][i]['type'] = 'withdrawal';
+        }
+        let withdrawals = this.parseTransactions (response['withdrawals'], code, since, limit);
+        return this.filterByCurrencySinceLimit (withdrawals, code, since, limit);
+    }
+
+    async fetchDeposits (code = undefined, since = undefined, limit = undefined, params = {}) {
+        let response = await this.fetchTransactionsHelper (code, since, limit, params);
+        for (let i = 0; i < response['deposits'].length; i++) {
+            response['deposits'][i]['type'] = 'deposit';
+        }
+        let deposits = this.parseTransactions (response['deposits'], code, since, limit);
+        return this.filterByCurrencySinceLimit (deposits, code, since, limit);
+    }
+
+    parseTransactionStatus (status) {
+        const statuses = {
+            'COMPLETE': 'ok',
+        };
+        return this.safeString (statuses, status, status);
+    }
+
+    parseTransaction (transaction, currency = undefined) {
+        //
+        // deposits
+        //
+        //      {      currency: "BTC",
+        //              address: "1MEtiqJWru53FhhHrfJPPvd2tC3TPDVcmW",
+        //               amount: "0.01063000",
+        //        confirmations:  1,
+        //                 txid: "6b2b0e1888d6d491591facc0d37b5ebec540ac1efb241fdbc22bcc20d1822fb6",
+        //            timestamp:  1507916888,
+        //               status: "COMPLETE"                                                          }
+        //
+        // withdrawals
+        //
+        //      { withdrawalNumber:  9290444,
+        //                currency: "ETH",
+        //                 address: "0x731015ff2e75261d50433fbd05bd57e942336149",
+        //                  amount: "0.15500000",
+        //                     fee: "0.00500000",
+        //               timestamp:  1514099289,
+        //                  status: "COMPLETE: 0x74d444493b4bca668992021fd9e54b5292b8e71d9927af1f076f554e4bea5b2d",
+        //               ipAddress: "5.228.227.214"                                                                 },
+        //
+        let timestamp = this.safeInteger (transaction, 'timestamp');
+        if (timestamp !== undefined) {
+            timestamp = timestamp * 1000;
+        }
+        let code = undefined;
+        let currencyId = this.safeString (transaction, 'currency');
+        currency = this.safeValue (this.currencies_by_id, currencyId);
+        if (currency === undefined) {
+            code = this.commonCurrencyCode (currencyId);
+        }
+        if (currency !== undefined) {
+            code = currency['code'];
+        }
+        let status = this.safeString (transaction, 'status', 'pending');
+        let txid = this.safeString (transaction, 'txid');
+        if (status !== undefined) {
+            let parts = status.split (': ');
+            let numParts = parts.length;
+            status = parts[0];
+            if ((numParts > 1) && (txid === undefined)) {
+                txid = parts[1];
+            }
+            status = this.parseTransactionStatus (status);
+        }
+        const id = this.safeString (transaction, 'withdrawalNumber');
+        const type = (id !== undefined) ? 'withdrawal' : 'deposit';
+        const amount = this.safeFloat (transaction, 'amount');
+        const address = this.safeString (transaction, 'address');
+        let feeCost = this.safeFloat (transaction, 'fee');
+        if (feeCost === undefined) {
+            if (type === 'deposit') {
+                // according to https://poloniex.com/fees/
+                feeCost = 0; // FIXME: remove hardcoded value that may change any time
+            } else if (type === 'withdrawal') {
+                throw new ExchangeError ('Withdrawal without fee detected!');
+            }
+        }
+        return {
+            'info': transaction,
+            'id': id,
+            'currency': code,
+            'amount': amount,
+            'address': address,
+            'tag': undefined,
+            'status': status,
+            'type': type,
+            'updated': undefined,
+            'txid': txid,
+            'timestamp': timestamp,
+            'datetime': this.iso8601 (timestamp),
+            'fee': {
+                'currency': code,
+                'cost': feeCost,
+            },
         };
     }
 
@@ -839,34 +1247,261 @@ module.exports = class poloniex extends Exchange {
             // syntax error, resort to default error handler
             return;
         }
+        // {"error":"Permission denied."}
         if ('error' in response) {
             const message = response['error'];
             const feedback = this.id + ' ' + this.json (response);
-            if (message === 'Invalid order number, or you are not the person who placed the order.') {
-                throw new OrderNotFound (feedback);
-            } else if (message === 'Connection timed out. Please try again.') {
-                throw new RequestTimeout (feedback);
-            } else if (message === 'Internal error. Please try again.') {
-                throw new ExchangeNotAvailable (feedback);
-            } else if (message === 'Order not found, or you are not the person who placed it.') {
-                throw new OrderNotFound (feedback);
-            } else if (message === 'Invalid API key/secret pair.') {
-                throw new AuthenticationError (feedback);
-            } else if (message === 'Please do not make more than 8 API calls per second.') {
-                throw new DDoSProtection (feedback);
-            } else if (message.indexOf ('Total must be at least') >= 0) {
-                throw new InvalidOrder (feedback);
-            } else if (message.indexOf ('This account is frozen.') >= 0) {
-                throw new AccountSuspended (feedback);
-            } else if (message.indexOf ('Not enough') >= 0) {
-                throw new InsufficientFunds (feedback);
-            } else if (message.indexOf ('Nonce must be greater') >= 0) {
-                throw new InvalidNonce (feedback);
-            } else if (message.indexOf ('You have already called cancelOrder or moveOrder on this order.') >= 0) {
-                throw new CancelPending (feedback);
+            let exact = this.exceptions['exact'];
+            if (message in exact) {
+                throw new exact[message] (feedback);
+            }
+            const broad = this.exceptions['broad'];
+            const broadKey = this.findBroadlyMatchedKey (broad, message);
+            if (broadKey !== undefined) {
+                throw new broad[broadKey] (feedback);
+            }
+            throw new ExchangeError (feedback); // unknown message
+        }
+    }
+
+    _websocketGenerateUrlStream (events, options) {
+        // let streamList = [];
+        // for (let i = 0; i < events.length; i++) {
+        //     let element = events[i];
+        //     let params = {
+        //         'event': element['event'],
+        //         'symbol': this._websocketMarketId (element['symbol']),
+        //     };
+        //     let streamGenerator = this.wsconf['events'][element['event']]['conx-param']['stream'];
+        //     streamList.push (this.implodeParams (streamGenerator, params));
+        // }
+        // let stream = streamList.join ('/');
+        return options['url'];
+    }
+
+    _websocketMarketId (symbol) {
+        return this.marketId (symbol).toLowerCase ();
+    }
+
+    _websocketOnMessage (contextId, data) {
+        let msg = JSON.parse (data);
+        let channelId = msg[0];
+        if (channelId === 1000) {
+            // account notification (beta)
+            console.log ('notification');
+        } else if (channelId === 1002) {
+            // ticker data
+            console.log ('ticker');
+        } else if (channelId === 1003) {
+            // 24 hour exchange volume
+            console.log ('24 hour exchange volume');
+        } else if (channelId === 1010) {
+            console.log (this.id + '._websocketOnMessage() heartbeat ' + data);
+        } else {
+            // if channelId is not one of the above, check if it is a marketId
+            let symbol = this.findSymbol (channelId.toString ());
+            if (symbol === channelId.toString ()) {
+                // Some error occured
+                this.emit ('err', new ExchangeError (this.id + '._websocketOnMessage() failed to get symbol for channelId: ' + channelId));
+                this.websocketClose (contextId);
             } else {
-                throw new ExchangeError (this.id + ' unknown error ' + this.json (response));
+                this._websocketHandleOb (contextId, msg);
             }
         }
+    }
+
+    _websocketHandleOb (contextId, data) {
+        // Poloniex calls this Price Aggregated Book
+        let channelId = data[0];
+        let sequenceNumber = data[1];
+        if (data.length > 2) {
+            let orderbook = data[2];
+            let symbol = this.findSymbol (channelId.toString ());
+            let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+            // Check if this is the first response which contains full current orderbook
+            if (orderbook[0][0] === 'i') {
+                // let currencyPair = orderbook[0][1]['currencyPair'];
+                let fullOrderbook = orderbook[0][1]['orderBook'];
+                let asks = [];
+                let bids = [];
+                let keys = [];
+                let i = 0;
+                keys = Object.keys (fullOrderbook[0]);
+                for (i = 0; i < keys.length; i++) {
+                    asks.push ([parseFloat (keys[i]), parseFloat (fullOrderbook[0][keys[i]])]);
+                }
+                keys = Object.keys (fullOrderbook[1]);
+                for (i = 0; i < keys.length; i++) {
+                    bids.push ([parseFloat (keys[i]), parseFloat (fullOrderbook[1][keys[i]])]);
+                }
+                fullOrderbook = {
+                    'asks': asks,
+                    'bids': bids,
+                    'isFrozen': 0,
+                    'seq': sequenceNumber,
+                };
+                // I decided not to push the initial orderbook to cache.
+                // This way is less consistent but I think it's easier.
+                fullOrderbook = this.parseOrderBook (fullOrderbook);
+                fullOrderbook = this._cloneOrderBook (fullOrderbook, symbolData['limit']);
+                fullOrderbook['obLastSequenceNumber'] = sequenceNumber;
+                symbolData['ob'] = fullOrderbook;
+                this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+                this.emit ('ob', symbol, symbolData['ob']);
+            } else {
+                let order = undefined;
+                let orderbookDelta = {
+                    'asks': [],
+                    'bids': [],
+                    'seq': sequenceNumber,
+                };
+                let price = 0.0;
+                let amount = 0.0;
+                let i = 0;
+                for (i = 0; i < orderbook.length; i++) {
+                    order = orderbook[i];
+                    if (order[0] === 'o') {
+                        price = parseFloat (order[2]);
+                        amount = parseFloat (order[3]);
+                        if (order[1] === 0) {
+                            // sell order
+                            orderbookDelta['asks'].push ([price, amount]);
+                        } else if (order[1] === 1) {
+                            // buy order
+                            orderbookDelta['bids'].push ([price, amount]);
+                        } else {
+                            // error
+                            this.emit ('err', new ExchangeError (this.id + '._websocketHandleOb() unknown value in buy/sell field. Expected 0 or 1 but got: ' + order[1]));
+                            this.websocketClose (contextId);
+                            return;
+                        }
+                    } else if (order[0] === 't') {
+                        // this is not an order but a trade
+                        console.log (this.id + '._websocketHandleOb() skipping trade.');
+                        continue;
+                    } else {
+                        // unknown value
+                        this.emit ('err', new ExchangeError (this.id + '._websocketHandleOb() unknown value in order/trade field. Expected \'o\' or \'t\' but got: ' + order[0]));
+                        this.websocketClose (contextId);
+                        return;
+                    }
+                }
+                // Add to cache
+                orderbookDelta = this.parseOrderBook (orderbookDelta);
+                if (typeof (symbolData['obDeltaCache']) === 'undefined') {
+                    // This check is necessary because the obDeltaCache will be deleted on a call to fetchOrderBook()
+                    symbolData['obDeltaCache'] = {}; // make empty cache
+                    symbolData['obDeltaCacheSize'] = 0; // counting number of cached deltas
+                }
+                symbolData['obDeltaCacheSize'] += 1;
+                let sequenceNumberStr = sequenceNumber.toString ();
+                symbolData['obDeltaCache'][sequenceNumberStr] = orderbookDelta;
+                // Schedule call to _websocketOrderBookDeltaCache()
+                this._websocketHandleObDeltaCache (contextId, symbol);
+                this.emit ('ob', symbol, symbolData['ob']);
+            }
+        }
+    }
+
+    _websocketHandleObDeltaCache (contextId, symbol) {
+        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        // Handle out-of-order sequenceNumber
+        // To avoid a memory leak, we must put a maximum on the size of obDeltaCache.
+        // When this maximum is reached, we accept that we have lost some orderbook updates.
+        // In this case we must fetch a new orderbook.
+        // Alternatively, we could apply all cached deltas and keep going.
+        if (symbolData['obDeltaCacheSize'] > symbolData['obDeltaCacheSizeMax']) {
+            symbolData['ob'] = this.fetchOrderBook (symbol, symbolData['limit']);
+            // delete symbolData['obDeltaCache'];
+            symbolData['obDeltaCache'] = undefined;
+            symbolData['obDeltaCacheSize'] = 0;
+            this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+            return;
+        }
+        if (symbolData['obDeltaCacheSize'] === 0) {
+            this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+            return;
+        }
+        // if the cache exists
+        // check if the next sequenceNumber is in the cache
+        let fullOrderbook = symbolData['ob'];
+        let lastSequenceNumber = fullOrderbook['obLastSequenceNumber'];
+        let cachedSequenceNumber = lastSequenceNumber + 1;
+        let cachedSequenceNumberStr = cachedSequenceNumber.toString ();
+        let orderbookDelta = symbolData['obDeltaCache'][cachedSequenceNumberStr];
+        let continueBool = typeof orderbookDelta !== 'undefined';
+        // While loop is not transpiled properly
+        // while (continueBool) {
+        let nkeys = symbolData['obDeltaCacheSize'];
+        let i = 0;
+        for (i = 0; i < nkeys; i++) {
+            if (!continueBool) {
+                break;
+            }
+            symbolData['obDeltaCache'][cachedSequenceNumberStr] = undefined;
+            fullOrderbook = this.mergeOrderBookDelta (symbolData['ob'], orderbookDelta);
+            fullOrderbook = this._cloneOrderBook (fullOrderbook, symbolData['limit']);
+            fullOrderbook['obLastSequenceNumber'] = cachedSequenceNumber;
+            symbolData['ob'] = fullOrderbook;
+            cachedSequenceNumber += 1;
+            orderbookDelta = symbolData['obDeltaCache'][cachedSequenceNumberStr];
+            continueBool = typeof orderbookDelta !== 'undefined';
+            symbolData['obDeltaCacheSize'] -= 1;
+        }
+        this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+    }
+
+    _websocketSubscribeOb (contextId, event, symbol, nonce, params = {}) {
+        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
+        symbolData['obDeltaCache'] = undefined;
+        symbolData['obDeltaCacheSize'] = 0;
+        symbolData['obDeltaCacheSizeMax'] = this.safeInteger (params, 'obDeltaCacheSizeMax', 10);
+        this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+        //
+        let market = this.marketId (symbol);
+        //
+        let payload = {
+            'command': 'subscribe',
+            'channel': market,
+        };
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
+        this.websocketSendJson (payload);
+    }
+
+    _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event === 'ob') {
+            this._websocketSubscribeOb (contextId, event, symbol, nonce, params);
+        } else {
+            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+    }
+
+    _websocketUnsubscribeOb (conxid, event, symbol, nonce, params) {
+        let market = this.marketId (symbol);
+        let payload = {
+            'command': 'unsubscribe',
+            'channel': market,
+        };
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
+        this.websocketSendJson (payload);
+    }
+
+    _websocketUnsubscribe (conxid, event, symbol, nonce, params) {
+        if (event === 'ob') {
+            this._websocketUnsubscribeOb (conxid, event, symbol, nonce, params);
+        } else {
+            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+    }
+
+    _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
+            return this._cloneOrderBook (data['ob'], limit);
+        }
+        return undefined;
     }
 };

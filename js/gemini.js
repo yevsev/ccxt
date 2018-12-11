@@ -3,7 +3,7 @@
 //  ---------------------------------------------------------------------------
 
 const Exchange = require ('./base/Exchange');
-const { ExchangeError } = require ('./base/errors');
+const { ExchangeError, ArgumentsRequired, NotSupported } = require ('./base/errors');
 
 //  ---------------------------------------------------------------------------
 
@@ -12,7 +12,7 @@ module.exports = class gemini extends Exchange {
         return this.deepExtend (super.describe (), {
             'id': 'gemini',
             'name': 'Gemini',
-            'countries': 'US',
+            'countries': [ 'US' ],
             'rateLimit': 1500, // 200 for private API
             'version': 'v1',
             'has': {
@@ -22,11 +22,15 @@ module.exports = class gemini extends Exchange {
                 'fetchBidsAsks': false,
                 'fetchTickers': false,
                 'fetchMyTrades': true,
-                'fetchOrder': false,
+                'fetchOrder': true,
                 'fetchOrders': false,
-                'fetchOpenOrders': false,
+                'fetchOpenOrders': true,
                 'fetchClosedOrders': false,
+                'createMarketOrder': false,
                 'withdraw': true,
+                'fetchTransactions': true,
+                'fetchWithdrawals': false,
+                'fetchDeposits': false,
             },
             'urls': {
                 'logo': 'https://user-images.githubusercontent.com/1294454/27816857-ce7be644-6096-11e7-82d6-3c257263229c.jpg',
@@ -63,10 +67,12 @@ module.exports = class gemini extends Exchange {
                         'orders',
                         'mytrades',
                         'tradevolume',
+                        'transfers',
                         'balances',
                         'deposit/{currency}/newAddress',
                         'withdraw/{currency}',
                         'heartbeat',
+                        'transfers',
                     ],
                 },
             },
@@ -74,6 +80,27 @@ module.exports = class gemini extends Exchange {
                 'trading': {
                     'taker': 0.0025,
                     'maker': 0.0025,
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws-s',
+                        'baseurl': 'wss://api.gemini.com/v1/marketdata/',
+                    },
+                },
+                'methodmap': {
+                    'fetchOrderBook': 'fetchOrderBook',
+                    '_websocketHandleObRestSnapshot': '_websocketHandleObRestSnapshot',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}-{symbol}',
+                        },
+                    },
                 },
             },
         });
@@ -148,9 +175,9 @@ module.exports = class gemini extends Exchange {
         if ('order_id' in trade)
             order = trade['order_id'].toString ();
         let fee = this.safeFloat (trade, 'fee_amount');
-        if (typeof fee !== 'undefined') {
+        if (fee !== undefined) {
             let currency = this.safeString (trade, 'fee_currency');
-            if (typeof currency !== 'undefined') {
+            if (currency !== undefined) {
                 if (currency in this.currencies_by_id)
                     currency = this.currencies_by_id[currency]['code'];
                 currency = this.commonCurrencyCode (currency);
@@ -170,7 +197,7 @@ module.exports = class gemini extends Exchange {
             'datetime': this.iso8601 (timestamp),
             'symbol': market['symbol'],
             'type': undefined,
-            'side': trade['type'],
+            'side': trade['type'].toLowerCase (),
             'price': price,
             'cost': price * amount,
             'amount': amount,
@@ -205,6 +232,87 @@ module.exports = class gemini extends Exchange {
         return this.parseBalance (result);
     }
 
+    parseOrder (order, market = undefined) {
+        let timestamp = order['timestampms'];
+        let amount = this.safeFloat (order, 'original_amount');
+        let remaining = this.safeFloat (order, 'remaining_amount');
+        let filled = this.safeFloat (order, 'executed_amount');
+        let status = 'closed';
+        if (order['is_live']) {
+            status = 'open';
+        }
+        if (order['is_cancelled']) {
+            status = 'canceled';
+        }
+        let price = this.safeFloat (order, 'price');
+        let average = this.safeFloat (order, 'avg_execution_price');
+        if (average !== 0.0) {
+            price = average; // prefer filling (execution) price over the submitted price
+        }
+        let cost = undefined;
+        if (filled !== undefined) {
+            if (average !== undefined) {
+                cost = filled * average;
+            }
+        }
+        let type = this.safeString (order, 'type');
+        if (type === 'exchange limit') {
+            type = 'limit';
+        } else if (type === 'market buy' || type === 'market sell') {
+            type = 'market';
+        } else {
+            type = order['type'];
+        }
+        let fee = undefined;
+        let symbol = undefined;
+        if (market === undefined) {
+            let marketId = this.safeString (order, 'symbol');
+            if (marketId in this.markets_by_id) {
+                market = this.markets_by_id[marketId];
+            }
+        }
+        if (market !== undefined) {
+            symbol = market['symbol'];
+        }
+        return {
+            'id': order['order_id'],
+            'info': order,
+            'timestamp': timestamp,
+            'datetime': this.iso8601 (timestamp),
+            'lastTradeTimestamp': undefined,
+            'status': status,
+            'symbol': symbol,
+            'type': type,
+            'side': order['side'].toLowerCase (),
+            'price': price,
+            'average': average,
+            'cost': cost,
+            'amount': amount,
+            'filled': filled,
+            'remaining': remaining,
+            'fee': fee,
+        };
+    }
+
+    async fetchOrder (id, symbol = undefined, params = {}) {
+        await this.loadMarkets ();
+        let response = await this.privatePostOrderStatus (this.extend ({
+            'order_id': id,
+        }, params));
+        return this.parseOrder (response);
+    }
+
+    async fetchOpenOrders (symbol = undefined, since = undefined, limit = undefined, params = {}) {
+        await this.loadMarkets ();
+        let response = await this.privatePostOrders (params);
+        let orders = this.parseOrders (response, undefined, since, limit);
+        if (symbol !== undefined) {
+            let market = this.market (symbol); // throws on non-existent symbol
+            orders = this.filterBySymbol (orders, market['symbol']);
+        }
+        return orders;
+    }
+
     async createOrder (symbol, type, side, amount, price = undefined, params = {}) {
         await this.loadMarkets ();
         if (type === 'market')
@@ -231,15 +339,17 @@ module.exports = class gemini extends Exchange {
     }
 
     async fetchMyTrades (symbol = undefined, since = undefined, limit = undefined, params = {}) {
-        if (typeof symbol === 'undefined')
-            throw new ExchangeError (this.id + ' fetchMyTrades requires a symbol argument');
+        if (symbol === undefined)
+            throw new ArgumentsRequired (this.id + ' fetchMyTrades requires a symbol argument');
         await this.loadMarkets ();
         let market = this.market (symbol);
         let request = {
             'symbol': market['id'],
         };
-        if (typeof limit !== 'undefined')
-            request['limit'] = limit;
+        if (limit !== undefined)
+            request['limit_trades'] = limit;
+        if (since !== undefined)
+            request['timestamp'] = parseInt (since / 1000);
         let response = await this.privatePostMytrades (this.extend (request, params));
         return this.parseTrades (response, market, since, limit);
     }
@@ -256,6 +366,57 @@ module.exports = class gemini extends Exchange {
         return {
             'info': response,
             'id': this.safeString (response, 'txHash'),
+        };
+    }
+
+    nonce () {
+        return this.milliseconds ();
+    }
+
+    async fetchTransactions (code = undefined, since = undefined, limit = undefined, params = {}) {
+        await this.loadMarkets ();
+        let request = {};
+        let response = await this.privatePostTransfers (this.extend (request, params));
+        return this.parseTransactions (response);
+    }
+
+    parseTransaction (transaction, currency = undefined) {
+        let timestamp = this.safeInteger (transaction, 'timestampms');
+        let code = undefined;
+        if (currency === undefined) {
+            let currencyId = this.safeString (transaction, 'currency');
+            if (currencyId in this.currencies_by_id) {
+                currency = this.currencies_by_id[currencyId];
+            }
+        }
+        if (currency !== undefined) {
+            code = currency['code'];
+        }
+        let type = this.safeString (transaction, 'type');
+        if (type !== undefined) {
+            type = type.toLowerCase ();
+        }
+        let status = 'pending';
+        // When deposits show as Advanced or Complete they are available for trading.
+        if (transaction['status'])
+            status = 'ok';
+        return {
+            'info': transaction,
+            'id': this.safeString (transaction, 'eid'),
+            'txid': this.safeString (transaction, 'txHash'),
+            'timestamp': timestamp,
+            'datetime': this.iso8601 (timestamp),
+            'address': undefined, // or is it defined?
+            'tag': undefined, // or is it defined?
+            'type': type, // direction of the transaction, ('deposit' | 'withdraw')
+            'amount': this.safeFloat (transaction, 'amount'),
+            'currency': code,
+            'status': status,
+            'updated': undefined,
+            'fee': {
+                'cost': undefined,
+                'rate': undefined,
+            },
         };
     }
 
@@ -305,8 +466,157 @@ module.exports = class gemini extends Exchange {
         return {
             'currency': code,
             'address': address,
-            'status': 'ok',
+            'tag': undefined,
             'info': response,
         };
+    }
+
+    _websocketOnMessage (contextId, data) {
+        let msg = JSON.parse (data);
+        // console.log(msg);
+        let lastSeqId = this._contextGet (contextId, 'sequence_id');
+        let seqId = this.safeInteger (msg, 'socket_sequence');
+        if (typeof lastSeqId !== 'undefined') {
+            lastSeqId = lastSeqId + 1;
+            if (lastSeqId !== seqId) {
+                this.emit ('err', new ExchangeError ('sequence id error in exchange: ' + this.id + ' (' + lastSeqId + '+1 !=' + seqId + ')'), contextId);
+                return;
+            }
+        }
+        this._contextSet (contextId, 'sequence_id', seqId);
+        let symbol = this._contextGet (contextId, 'symbol');
+        let msgType = msg['type'];
+        if (msgType === 'heartbeat') {
+            return;
+        }
+        if (msgType === 'update') {
+            let events = this.safeValue (msg, 'events', []);
+            let symbolData = undefined;
+            let obEventActive = false;
+            let subscribedEvents = this._contextGetEvents (contextId);
+            if ('ob' in subscribedEvents) {
+                symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+                obEventActive = true;
+                let eventsLength = events.length;
+                if (eventsLength > 0) {
+                    let event = events[0];
+                    if ((event['type'] === 'change') && (this.safeString (event, 'reason') === 'initial')) {
+                        symbolData['ob'] = {
+                            'bids': [],
+                            'asks': [],
+                            'timestamp': undefined,
+                            'datetime': undefined,
+                        };
+                    } else {
+                        let timestamp = this.safeFloat (msg, 'timestamp');
+                        symbolData['ob']['timestamp'] = timestamp;
+                        symbolData['ob']['datetime'] = this.iso8601 (timestamp);
+                    }
+                    symbolData['ob']['nonce'] = this.safeInteger (msg, 'eventId');
+                }
+            }
+            for (let i = 0; i < events.length; i++) {
+                let event = events[i];
+                let eventType = event['type'];
+                if ((eventType === 'change') && obEventActive) {
+                    let side = this.safeString (event, 'side');
+                    let price = this.safeFloat (event, 'price');
+                    let size = this.safeFloat (event, 'remaining');
+                    let keySide = (side === 'bid') ? 'bids' : 'asks';
+                    this.updateBidAsk ([price, size], symbolData['ob'][keySide], side === 'bid');
+                }
+            }
+            if (obEventActive) {
+                this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit']));
+                this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+            }
+        }
+    }
+
+    _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob') {
+            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        if (event === 'ob') {
+            let data = this._contextGetSymbolData (contextId, event, symbol);
+            data['limit'] = this.safeInteger (params, 'limit', undefined);
+            this._contextSetSymbolData (contextId, event, symbol, data);
+        }
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
+    }
+
+    _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob') {
+            throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
+    }
+
+    _websocketOnOpen (contextId, websocketConexConfig) {
+        let url = websocketConexConfig['url'];
+        let parts = url.split ('?');
+        let partsLen = parts.length;
+        if (partsLen > 1) {
+            let params = parts[1];
+            parts = parts[0].split ('/');
+            partsLen = parts.length;
+            let symbol = parts[partsLen - 1];
+            symbol = this.findSymbol (symbol);
+            this._contextSet (contextId, 'symbol', symbol);
+            params = params.split ('&');
+            for (let i = 0; i < params.length; i++) {
+                let param = params[i];
+                parts = param.split ('=');
+                partsLen = parts.length;
+                if (partsLen > 1) {
+                    let event = undefined;
+                    if (parts[0] === 'bids') {
+                        event = 'ob';
+                    }
+                    if ((event !== undefined) && (parts[1] === 'true')) {
+                        this._contextSetSubscribed (contextId, event, symbol, true);
+                        this._contextSetSubscribing (contextId, event, symbol, false);
+                    }
+                }
+            }
+        }
+    }
+
+    _websocketGenerateUrlStream (events, options, params = {}) {
+        // check all events has the same symbol and build parameter list
+        let symbol = undefined;
+        let urlParams = {
+            'heartbeat': 'true',
+            'bids': 'false',
+            'offers': 'false',
+            'trades': 'false',
+        };
+        for (let i = 0; i < events.length; i++) {
+            let event = events[i];
+            if (!symbol) {
+                symbol = event['symbol'];
+            } else if (symbol !== event['symbol']) {
+                throw new ExchangeError ('invalid configuration: not same symbol in event list: ' + symbol + ' ' + event['symbol']);
+            }
+            if (event['event'] === 'ob') {
+                urlParams['bids'] = 'true';
+                urlParams['offers'] = 'true';
+            } else if (event['event'] === 'trade') {
+                urlParams['trades'] = true;
+            } else {
+                throw new ExchangeError ('invalid configuration: event not reconigzed ' + event['event']);
+            }
+        }
+        return options['url'] + this._websocketMarketId (symbol) + '?' + this.urlencode (urlParams);
+    }
+
+    _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
+            return this._cloneOrderBook (data['ob'], limit);
+        }
+        return undefined;
     }
 };
