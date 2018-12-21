@@ -3,7 +3,7 @@
 //  ---------------------------------------------------------------------------
 
 const Exchange = require ('./base/Exchange');
-const { AuthenticationError, BadRequest, DDoSProtection, ExchangeError, ExchangeNotAvailable, InvalidOrder, OrderNotFound, PermissionDenied, NotSupported } = require ('./base/errors');
+const { AuthenticationError, BadRequest, DDoSProtection, ExchangeError, ExchangeNotAvailable, InsufficientFunds, InvalidOrder, OrderNotFound, PermissionDenied, NotSupported } = require ('./base/errors');
 
 //  ---------------------------------------------------------------------------
 
@@ -156,18 +156,21 @@ module.exports = class bitmex extends Exchange {
                     'Invalid API Key.': AuthenticationError,
                     'Access Denied': PermissionDenied,
                     'Duplicate clOrdID': InvalidOrder,
+                    'Signature not valid': AuthenticationError,
                 },
                 'broad': {
                     'overloaded': ExchangeNotAvailable,
+                    'Account has insufficient Available Balance': InsufficientFunds,
                 },
             },
             'options': {
+                'api-expires': undefined,
                 'fetchTickerQuotes': false,
             },
         });
     }
 
-    async fetchMarkets () {
+    async fetchMarkets (params = {}) {
         let markets = await this.publicGetInstrumentActiveAndIndices ();
         let result = [];
         for (let p = 0; p < markets.length; p++) {
@@ -379,7 +382,7 @@ module.exports = class bitmex extends Exchange {
     }
 
     parseOHLCV (ohlcv, market = undefined, timeframe = '1m', since = undefined, limit = undefined) {
-        let timestamp = this.parse8601 (ohlcv['timestamp']) - this.parseTimeframe (timeframe) * 1000;
+        let timestamp = this.parse8601 (ohlcv['timestamp']);
         return [
             timestamp,
             ohlcv['open'],
@@ -414,8 +417,7 @@ module.exports = class bitmex extends Exchange {
         // if since is not set, they will return candles starting from 2017-01-01
         if (since !== undefined) {
             let ymdhms = this.ymdhms (since);
-            let ymdhm = ymdhms.slice (0, 16);
-            request['startTime'] = ymdhm; // starting date filter for results
+            request['startTime'] = ymdhms; // starting date filter for results
         }
         let response = await this.publicGetTradeBucketed (this.extend (request, params));
         return this.parseOHLCVs (response, market, timeframe, since, limit);
@@ -597,13 +599,13 @@ module.exports = class bitmex extends Exchange {
         };
     }
 
-    handleErrors (code, reason, url, method, headers, body) {
+    handleErrors (code, reason, url, method, headers, body, response = undefined) {
         if (code === 429)
             throw new DDoSProtection (this.id + ' ' + body);
         if (code >= 400) {
             if (body) {
                 if (body[0] === '{') {
-                    let response = JSON.parse (body);
+                    response = JSON.parse (body);
                     const error = this.safeValue (response, 'error', {});
                     const message = this.safeString (error, 'message');
                     const feedback = this.id + ' ' + body;
@@ -637,20 +639,29 @@ module.exports = class bitmex extends Exchange {
         let url = this.urls['api'] + query;
         if (api === 'private') {
             this.checkRequiredCredentials ();
+            let auth = method + query;
+            let expires = this.safeInteger (this.options, 'api-expires');
             let nonce = this.nonce ().toString ();
-            let auth = method + query + nonce;
+            headers = {
+                'Content-Type': 'application/json',
+                'api-key': this.apiKey,
+            };
+            if (expires !== undefined) {
+                expires = this.sum (this.seconds (), expires);
+                expires = expires.toString ();
+                auth += expires;
+                headers['api-expires'] = expires;
+            } else {
+                auth += nonce;
+                headers['api-nonce'] = nonce;
+            }
             if (method === 'POST' || method === 'PUT') {
                 if (Object.keys (params).length) {
                     body = this.json (params);
                     auth += body;
                 }
             }
-            headers = {
-                'Content-Type': 'application/json',
-                'api-nonce': nonce,
-                'api-key': this.apiKey,
-                'api-signature': this.hmac (this.encode (auth), this.encode (this.secret)),
-            };
+            headers['api-signature'] = this.hmac (this.encode (auth), this.encode (this.secret));
         }
         return { 'url': url, 'method': method, 'body': body, 'headers': headers };
     }
@@ -660,7 +671,7 @@ module.exports = class bitmex extends Exchange {
         if (typeof lastTimer !== 'undefined') {
             this._cancelTimeout (lastTimer);
         }
-        lastTimer = this._setTimeout (5000, this._websocketMethodMap ('_websocketTimeoutSendPing'), []);
+        lastTimer = this._setTimeout (contextId, 5000, this._websocketMethodMap ('_websocketTimeoutSendPing'), []);
         this._contextSet (contextId, 'timer', lastTimer);
         let dbids = {};
         this._contextSet (contextId, 'dbids', dbids);
@@ -859,7 +870,7 @@ module.exports = class bitmex extends Exchange {
         }
         symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
         let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
         symbolData['sub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         this.websocketSendJson (payload);
@@ -879,7 +890,7 @@ module.exports = class bitmex extends Exchange {
             symbolData['unsub-nonces'] = {};
         }
         let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
+        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
         symbolData['unsub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         this.websocketSendJson (payload);

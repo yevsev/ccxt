@@ -157,11 +157,12 @@ class bitstamp extends Exchange {
                 'Missing key, signature and nonce parameters' => '\\ccxt\\AuthenticationError',
                 'Your account is frozen' => '\\ccxt\\PermissionDenied',
                 'Please update your profile with your FATCA information, before using API.' => '\\ccxt\\PermissionDenied',
+                'Order not found' => '\\ccxt\\OrderNotFound',
             ),
         ));
     }
 
-    public function fetch_markets () {
+    public function fetch_markets ($params = array ()) {
         $markets = $this->publicGetTradingPairsInfo ();
         $result = array ();
         for ($i = 0; $i < count ($markets); $i++) {
@@ -342,6 +343,7 @@ class bitstamp extends Exchange {
         $orderId = $this->safe_string($trade, 'order_id');
         $price = $this->safe_float($trade, 'price');
         $amount = $this->safe_float($trade, 'amount');
+        $cost = $this->safe_float($trade, 'cost');
         $id = $this->safe_string_2($trade, 'tid', 'id');
         if ($market === null) {
             $keys = is_array ($trade) ? array_keys ($trade) : array ();
@@ -363,6 +365,7 @@ class bitstamp extends Exchange {
         if ($market !== null) {
             $price = $this->safe_float($trade, $market['symbolId'], $price);
             $amount = $this->safe_float($trade, $market['baseId'], $amount);
+            $cost = $this->safe_float($trade, $market['quoteId'], $cost);
             $feeCurrency = $market['quote'];
             $symbol = $market['symbol'];
         }
@@ -374,10 +377,11 @@ class bitstamp extends Exchange {
             }
             $amount = abs ($amount);
         }
-        $cost = null;
-        if ($price !== null) {
-            if ($amount !== null) {
-                $cost = $price * $amount;
+        if ($cost === null) {
+            if ($price !== null) {
+                if ($amount !== null) {
+                    $cost = $price * $amount;
+                }
             }
         }
         if ($cost !== null) {
@@ -871,7 +875,7 @@ class bitstamp extends Exchange {
         return array ( 'url' => $url, 'method' => $method, 'body' => $body, 'headers' => $headers );
     }
 
-    public function handle_errors ($httpCode, $reason, $url, $method, $headers, $body) {
+    public function handle_errors ($httpCode, $reason, $url, $method, $headers, $body, $response = null) {
         if (gettype ($body) !== 'string')
             return; // fallback to default $error handler
         if (strlen ($body) < 2)

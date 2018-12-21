@@ -82,8 +82,8 @@ module.exports = class okex extends okcoinusd {
         };
     }
 
-    async fetchMarkets () {
-        let markets = await super.fetchMarkets ();
+    async fetchMarkets (params = {}) {
+        let markets = await super.fetchMarkets (params);
         // TODO: they have a new fee schedule as of Feb 7
         // the new fees are progressive and depend on 30-day traded volume
         // the following is the worst case
@@ -149,11 +149,7 @@ module.exports = class okex extends okcoinusd {
         if (typeof heartbeatTimer !== 'undefined') {
             this._cancelTimer (heartbeatTimer);
         }
-        heartbeatTimer = this._setTimer (
-            30000,
-            this._websocketMethodMap ('_websocketSendHeartbeat'),
-            [contextId]
-        );
+        heartbeatTimer = this._setTimer (contextId, 30000, this._websocketMethodMap ('_websocketSendHeartbeat'), [contextId]);
         this._contextSet (contextId, 'heartbeattimer', heartbeatTimer);
     }
 

@@ -16,6 +16,7 @@ import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import PermissionDenied
+from ccxt.base.errors import OrderNotFound
 from ccxt.base.errors import NotSupported
 from ccxt.base.errors import InvalidNonce
 
@@ -170,10 +171,11 @@ class bitstamp (Exchange):
                 'Missing key, signature and nonce parameters': AuthenticationError,
                 'Your account is frozen': PermissionDenied,
                 'Please update your profile with your FATCA information, before using API.': PermissionDenied,
+                'Order not found': OrderNotFound,
             },
         })
 
-    def fetch_markets(self):
+    def fetch_markets(self, params={}):
         markets = self.publicGetTradingPairsInfo()
         result = []
         for i in range(0, len(markets)):
@@ -339,6 +341,7 @@ class bitstamp (Exchange):
         orderId = self.safe_string(trade, 'order_id')
         price = self.safe_float(trade, 'price')
         amount = self.safe_float(trade, 'amount')
+        cost = self.safe_float(trade, 'cost')
         id = self.safe_string_2(trade, 'tid', 'id')
         if market is None:
             keys = list(trade.keys())
@@ -356,6 +359,7 @@ class bitstamp (Exchange):
         if market is not None:
             price = self.safe_float(trade, market['symbolId'], price)
             amount = self.safe_float(trade, market['baseId'], amount)
+            cost = self.safe_float(trade, market['quoteId'], cost)
             feeCurrency = market['quote']
             symbol = market['symbol']
         if amount is not None:
@@ -364,10 +368,10 @@ class bitstamp (Exchange):
             else:
                 side = 'buy'
             amount = abs(amount)
-        cost = None
-        if price is not None:
-            if amount is not None:
-                cost = price * amount
+        if cost is None:
+            if price is not None:
+                if amount is not None:
+                    cost = price * amount
         if cost is not None:
             cost = abs(cost)
         return {
@@ -807,7 +811,7 @@ class bitstamp (Exchange):
             }
         return {'url': url, 'method': method, 'body': body, 'headers': headers}
 
-    def handle_errors(self, httpCode, reason, url, method, headers, body):
+    def handle_errors(self, httpCode, reason, url, method, headers, body, response=None):
         if not isinstance(body, basestring):
             return  # fallback to default error handler
         if len(body) < 2:
