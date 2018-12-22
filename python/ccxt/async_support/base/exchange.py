@@ -61,6 +61,7 @@ class Exchange(BaseExchange, EventEmitter):
         self.own_session = 'session' not in config
         # async connection initialization
         self.wsconf = {}
+        self.pending_subs = {}
         self.websocketContexts = {}
         self.wsproxy = None
         self.cafile = config.get('cafile', certifi.where())
@@ -598,7 +599,67 @@ class Exchange(BaseExchange, EventEmitter):
         else:
             raise NotSupported("invalid websocket connection: " + config['type'] + " for exchange " + self.id)
 
-    async def _websocket_ensure_conx_active(self, event, symbol, subscribe, subscription_params={}):
+    def websocket_add_subscriptions(self, event, symbol_list, params={}):
+        '''
+            All subscriptions that are added must be of the same event.
+            :param event: str
+            :param symbol_list: list of str or str
+            :param params: dict
+        '''
+        if not self._websocketValidEvent(event):
+            self.wslogger.error(self.id + ' not valid event ' + event + ' for exchange ' + self.id)
+            raise ExchangeError('Not valid event ' + event + ' for exchange ' + self.id)
+
+        self.wslogger.debug(self.id + ' Adding ' + str(len(symbol_list)) + ' symbols.')
+        self._add_subscriptions(event, symbol_list, params)
+
+    async def websocket_deploy_subscriptions(self, event):
+        '''
+            Deploy all pending subscriptions for a specific event.
+        '''
+        if not isinstance(event, str):
+            raise ValueError(self.id + ' expected type \"str\" for parameter \"event\" but got ' + type(event))
+        if not self._websocketValidEvent(event):
+            raise ExchangeError('Not valid event ' + event + ' for exchange ' + self.id)
+
+        self.wslogger.debug(self.id + ' deploying event ' + event)
+        subs_list = self.pending_subs[event]
+        conxid = 'firstrun'
+        for sub in subs_list:
+            symbol = sub['symbol']
+            conxid_new = await self._websocket_ensure_conx_active(event=event, symbol=symbol, subscribe=True, connect=False)
+            self._contextSetSubscribing(conxid_new, event, symbol, True)
+            if isinstance(conxid, str):
+                if conxid == 'firstrun':
+                    conxid = conxid_new
+                    continue
+            if conxid_new != conxid:
+                raise ValueError(self.id + ' Mismatching conxid in list of subscriptions: ', json.dumps(subs_list,indent=2))
+            conxid = conxid_new
+        try:
+            await self._websocket_deploy_subscriptions(conxid, subs_list)
+        except Exception:
+            self.wslogger.error(self.id + ' Error in call to _websocket_deploy_subscriptions(). ', exc_info=True)
+        del self.pending_subs[event]
+
+    async def _websocket_deploy_subscriptions(self, conxid, subs_list):
+        '''
+            Override this method in exchange specific class. Exchanges of type ws-s greatly benefit from this function.
+            For example, in binance, we would only have to call make a "await self.websocket_connect()" in this function.
+            :param conxid str key for getting websocket object
+            :param subs_list dict with fields {'event', 'symbol', 'params'}
+        '''
+        for sub in subs_list:
+            await self.websocket_subscribe(event=sub['event'], symbol=sub['symbol'], params=sub['params'])
+            await asyncio.sleep(0.021)
+
+    async def _websocket_ensure_conx_active(self, event, symbol, subscribe, connect=True):
+        '''
+            This is an exact copy of the super class function except for the connect parameter.
+        '''
+
+        # self.wslogger.debug(self.id + ' connect = ' + str(connect))
+
         await self.load_markets()
         # self.load_markets()
         ret = self._websocketGetConxid4Event(event, symbol)
@@ -606,10 +667,14 @@ class Exchange(BaseExchange, EventEmitter):
         conxtpl = ret['conxtpl']
         if (not(conxid in self.websocketContexts)):
             self._websocket_reset_context(conxid, conxtpl)
-        action = self._websocket_get_action_for_event(conxid, event, symbol, subscribe, subscription_params)
+        subscribed_symbols = self._websocket_context_get_subscribed_event_symbols(conxid)
+        # self.wslogger.debug(self.id + ' subscribed_symbols = ' + json.dumps(subscribed_symbols,indent=2))
+        action = self._websocket_get_action_for_event(conxid, event, symbol, subscribe)
+        # self.wslogger.debug(self.id + ' action = ' + json.dumps(action,indent=2))
+
         if (action is not None):
             conx_config = self.safe_value(action, 'conx-config', {})
-            conx_config['verbose'] = self.verbose
+            # self.wslogger.debug(self.id + ' conx_config = ' + json.dumps(conx_config,indent=2))
             if (not(event in self._contextGetEvents(conxid))):
                 self._contextResetEvent(conxid, event)
             if (not(symbol in self._contextGetSymbols(conxid, event))):
@@ -617,9 +682,11 @@ class Exchange(BaseExchange, EventEmitter):
             if (action['action'] == 'reconnect'):
                 conx = self._contextGetConnection(conxid)
                 if (conx is not None):
+                    self.wslogger.debug(self.id + ' conx.close()')
                     conx.close()
                 if (action['reset-context'] == 'onreconnect'):
-                    self._websocket_reset_context(conxid, conxtpl)
+                    if connect:
+                        self._websocket_reset_context(conxid, conxtpl)
                 self._contextSetConnectionInfo(conxid, self._websocket_initialize(conx_config, conxid))
             elif (action['action'] == 'connect'):
                 conx = self._contextGetConnection(conxid)
@@ -645,7 +712,8 @@ class Exchange(BaseExchange, EventEmitter):
             #         'data': {},
             #         'conxid': conx_config['id'],
             #     }
-            await self.websocket_connect(conxid)
+            if connect:
+                await self.websocket_connect()
         return conxid
 
     async def websocket_connect(self, conxid='default'):
