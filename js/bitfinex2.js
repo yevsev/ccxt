@@ -182,6 +182,7 @@ module.exports = class bitfinex2 extends bitfinex {
                             'url': '{baseurl}',
                             'id': '{id}',
                         },
+                    },
                     'trade': {
                         'conx-tpl': 'default',
                         'conx-param': {
