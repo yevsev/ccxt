@@ -599,8 +599,17 @@ module.exports = class bitfinex2 extends bitfinex {
 
     _websocketHandleTrade (contextId, symbol, msg) {
         const market = this.market (symbol);
-        const trade = this.parseTrade (msg, market);
-        this.emit ('trade', symbol, trade);
+        if (['te', 'tu'].includes(msg[1])) {
+            // update
+            var trades = [msg[2]]
+        } else {
+            // snapshot
+            var trades = msg[1]
+        }
+        trades = this.parseTrades(trades, market)
+        for (let i = 0; i < trades.length; i++) {
+            this.emit ('trade', symbol, trades[i]);
+        }
     }
 
     _websocketHandleOrderBook (contextId, symbol, msg) {
