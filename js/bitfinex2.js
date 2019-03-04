@@ -599,9 +599,13 @@ module.exports = class bitfinex2 extends bitfinex {
 
     _websocketHandleTrade (contextId, symbol, msg) {
         const market = this.market (symbol);
-        if (['te', 'tu'].includes(msg[1])) {
-            // update
+        // From http://blog.bitfinex.com/api/websocket-api-update:
+        // "We are splitting the public trade messages into two: a “te” message which mimics the current behavior, and a “tu” message which will be delayed by 1-2 seconds and include the tradeId. If the tradeId is important to you, use the “tu” message. If speed is important to you, listen to the “te” message. Or of course use both if you’d like."
+        if (msg[1] === 'te') {
+            // te update
             var trades = [msg[2]]
+        } else if (msg[1] === 'tu') {
+            // tu update, ignore
         } else {
             // snapshot
             var trades = msg[1]
