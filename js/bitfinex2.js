@@ -183,6 +183,13 @@ module.exports = class bitfinex2 extends bitfinex {
                             'id': '{id}',
                         },
                     },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
         });
@@ -528,6 +535,8 @@ module.exports = class bitfinex2 extends bitfinex {
                 let channel = this.safeString (msg, 'channel');
                 if (channel === 'book') {
                     this._websocketHandleSubscription (contextId, 'ob', msg);
+                } else if (channel === 'trades') {
+                    this._websocketHandleSubscription (contextId, 'trade', msg);
                 }
             } else if (event === 'unsubscribed') {
                 this._websocketHandleUnsubscription (contextId, msg);
@@ -554,6 +563,8 @@ module.exports = class bitfinex2 extends bitfinex {
             let event = channels[chanKey]['event'];
             if (event === 'ob') {
                 this._websocketHandleOrderBook (contextId, symbol, msg);
+            } else if (event === 'trade') {
+                this._websocketHandleTrade (contextId, symbol, msg);
             }
         }
     }
@@ -578,8 +589,32 @@ module.exports = class bitfinex2 extends bitfinex {
             let id = this.safeString (msg, 'symbol');
             let symbol = this.findSymbol (id);
             this._websocketProcessPendingNonces (contextId, 'sub-nonces', 'ob', symbol, false, ex);
+        } else if (channel === 'trades') {
+            let id = this.safeString (msg, 'symbol');
+            let symbol = this.findSymbol (id);
+            this._websocketProcessPendingNonces (contextId, 'sub-nonces', 'trade', symbol, false, ex);
         }
         this.emit ('err', ex, contextId);
+    }
+
+    _websocketHandleTrade (contextId, symbol, msg) {
+        const market = this.market (symbol);
+        // From http://blog.bitfinex.com/api/websocket-api-update:
+        // "We are splitting the public trade messages into two: a “te” message which mimics the current behavior, and a “tu” message which will be delayed by 1-2 seconds and include the tradeId. If the tradeId is important to you, use the “tu” message. If speed is important to you, listen to the “te” message. Or of course use both if you’d like."
+        if (msg[1] === 'te') {
+            // te update
+            var trades = [msg[2]];
+        } else if (msg[1] === 'tu') {
+            // tu update, ignore
+            return;
+        } else {
+            // snapshot
+            var trades = msg[1];
+        }
+        trades = this.parseTrades(trades, market);
+        for (let i = 0; i < trades.length; i++) {
+            this.emit ('trade', symbol, trades[i]);
+        }
     }
 
     _websocketHandleOrderBook (contextId, symbol, msg) {
@@ -687,7 +722,11 @@ module.exports = class bitfinex2 extends bitfinex {
         let symbolData = this._contextGetSymbolData (contextId, event, symbol);
         symbolData['channelId'] = channel;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
-        this._websocketProcessPendingNonces (contextId, 'sub-nonces', 'ob', symbol, true, undefined);
+        if (event === 'ob') {
+            this._websocketProcessPendingNonces (contextId, 'sub-nonces', 'ob', symbol, true, undefined);
+        } else if (event === 'trade') {
+            this._websocketProcessPendingNonces (contextId, 'sub-nonces', 'trade', symbol, true, undefined);
+        }
     }
 
     _websocketHandleUnsubscription (contextId, msg) {
@@ -710,7 +749,7 @@ module.exports = class bitfinex2 extends bitfinex {
     }
 
     _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
-        if (event !== 'ob') {
+        if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         // save nonce for subscription response
@@ -725,18 +764,26 @@ module.exports = class bitfinex2 extends bitfinex {
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         // send request
         const id = this.marketId (symbol);
-        this.websocketSendJson ({
-            'event': 'subscribe',
-            'channel': 'book',
-            'symbol': id,
-            'prec': 'P0',
-            'freq': 'F0',
-            'len': '100',
-        });
+        if (event === 'ob') {
+            this.websocketSendJson ({
+                'event': 'subscribe',
+                'channel': 'book',
+                'symbol': id,
+                'prec': 'P0',
+                'freq': 'F0',
+                'len': '100',
+            });
+        } else if (event === 'trade') {
+            this.websocketSendJson ({
+                'event': 'subscribe',
+                'channel': 'trades',
+                'symbol': id,
+            });
+        }
     }
 
     _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
-        if (event !== 'ob') {
+        if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         let symbolData = this._contextGetSymbolData (contextId, event, symbol);
