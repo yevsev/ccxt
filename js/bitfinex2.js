@@ -603,14 +603,15 @@ module.exports = class bitfinex2 extends bitfinex {
         // "We are splitting the public trade messages into two: a “te” message which mimics the current behavior, and a “tu” message which will be delayed by 1-2 seconds and include the tradeId. If the tradeId is important to you, use the “tu” message. If speed is important to you, listen to the “te” message. Or of course use both if you’d like."
         if (msg[1] === 'te') {
             // te update
-            var trades = [msg[2]]
+            var trades = [msg[2]];
         } else if (msg[1] === 'tu') {
             // tu update, ignore
+            return;
         } else {
             // snapshot
-            var trades = msg[1]
+            var trades = msg[1];
         }
-        trades = this.parseTrades(trades, market)
+        trades = this.parseTrades(trades, market);
         for (let i = 0; i < trades.length; i++) {
             this.emit ('trade', symbol, trades[i]);
         }
@@ -721,9 +722,9 @@ module.exports = class bitfinex2 extends bitfinex {
         let symbolData = this._contextGetSymbolData (contextId, event, symbol);
         symbolData['channelId'] = channel;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
-        if (channel === 'book') {
+        if (event === 'ob') {
             this._websocketProcessPendingNonces (contextId, 'sub-nonces', 'ob', symbol, true, undefined);
-        } else if (channel === 'trades') {
+        } else if (event === 'trade') {
             this._websocketProcessPendingNonces (contextId, 'sub-nonces', 'trade', symbol, true, undefined);
         }
     }
