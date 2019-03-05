@@ -1219,12 +1219,12 @@ module.exports = class poloniex extends Exchange {
         if (data.length > 2) {
             let orderbook = data[2];
             // let symbol = this.findSymbol (channelId.toString ());
-            let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
             // Check if this is the first response which contains full current orderbook
             if (orderbook[0][0] === 'i') {
                 if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
                     return;
                 }
+                let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
                 // let currencyPair = orderbook[0][1]['currencyPair'];
                 let fullOrderbook = orderbook[0][1]['orderBook'];
                 let asks = [];
@@ -1296,6 +1296,7 @@ module.exports = class poloniex extends Exchange {
                 }
                 // Add to cache
                 orderbookDelta = this.parseOrderBook (orderbookDelta);
+                let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
                 if (typeof (symbolData['obDeltaCache']) === 'undefined') {
                     // This check is necessary because the obDeltaCache will be deleted on a call to fetchOrderBook()
                     symbolData['obDeltaCache'] = {}; // make empty cache
@@ -1368,11 +1369,11 @@ module.exports = class poloniex extends Exchange {
         this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
         // get symbol id2
         // let market = this.marketId (symbol);
-        let market = this.findMarket (symbol);
-        let symbolsIds = this._contextGet (contextId, 'symbolids');
-        symbolsIds[market['id2']] = symbol;
-        this._contextSet (contextId, 'symbolids', symbolsIds);
         if (!this._contextIsSubscribed (contextId, 'trade', symbol)) {
+            let market = this.findMarket (symbol);
+            let symbolsIds = this._contextGet (contextId, 'symbolids');
+            symbolsIds[market['id2']] = symbol;
+            this._contextSet (contextId, 'symbolids', symbolsIds);
             let payload = {
                 'command': 'subscribe',
                 'channel': market['id'],
@@ -1386,6 +1387,9 @@ module.exports = class poloniex extends Exchange {
     _websocketSubscribeTrade (contextId, event, symbol, nonce, params = {}) {
         if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
             let market = this.findMarket (symbol);
+            let symbolsIds = this._contextGet (contextId, 'symbolids');
+            symbolsIds[market['id2']] = symbol;
+            this._contextSet (contextId, 'symbolids', symbolsIds);
             let payload = {
                 'command': 'subscribe',
                 'channel': market['id'],
