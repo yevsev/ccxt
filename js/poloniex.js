@@ -1200,6 +1200,8 @@ module.exports = class poloniex extends Exchange {
             let symbolsIds = this._contextGet (contextId, 'symbolids');
             let channelIdStr = channelId.toString ();
             if (channelIdStr in symbolsIds) {
+                // both 'ob' and 'trade' are handled by the same execution branch
+                // as on poloniex they are part of the same endpoint
                 let symbol = symbolsIds[channelIdStr];
                 this._websocketHandleOb (contextId, symbol, msg);
             } else {
@@ -1220,6 +1222,9 @@ module.exports = class poloniex extends Exchange {
             let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
             // Check if this is the first response which contains full current orderbook
             if (orderbook[0][0] === 'i') {
+                if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
+                    return;
+                }
                 // let currencyPair = orderbook[0][1]['currencyPair'];
                 let fullOrderbook = orderbook[0][1]['orderBook'];
                 let asks = [];
@@ -1285,6 +1290,9 @@ module.exports = class poloniex extends Exchange {
                         this.websocketClose (contextId);
                         return;
                     }
+                }
+                if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
+                    return;
                 }
                 // Add to cache
                 orderbookDelta = this.parseOrderBook (orderbookDelta);
@@ -1377,6 +1385,7 @@ module.exports = class poloniex extends Exchange {
 
     _websocketSubscribeTrade (contextId, event, symbol, nonce, params = {}) {
         if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
+            let market = this.findMarket (symbol);
             let payload = {
                 'command': 'subscribe',
                 'channel': market['id'],
