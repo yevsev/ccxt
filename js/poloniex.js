@@ -1364,27 +1364,27 @@ module.exports = class poloniex extends Exchange {
         let symbolsIds = this._contextGet (contextId, 'symbolids');
         symbolsIds[market['id2']] = symbol;
         this._contextSet (contextId, 'symbolids', symbolsIds);
-        if (! this._contextIsSubscribed (contextId, 'trade', symbol) {
+        if (!this._contextIsSubscribed (contextId, 'trade', symbol)) {
             let payload = {
                 'command': 'subscribe',
                 'channel': market['id'],
             };
-            let nonceStr = nonce.toString ();
-            this.emit (nonceStr, true);
             this.websocketSendJson (payload);
         }
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
     }
 
     _websocketSubscribeTrade (contextId, event, symbol, nonce, params = {}) {
-        if (! this._contextIsSubscribed (contextId, 'ob', symbol) {
+        if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
             let payload = {
                 'command': 'subscribe',
                 'channel': market['id'],
             };
-            let nonceStr = nonce.toString ();
-            this.emit (nonceStr, true);
             this.websocketSendJson (payload);
         }
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
     }
 
     _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
@@ -1398,19 +1398,36 @@ module.exports = class poloniex extends Exchange {
     }
 
     _websocketUnsubscribeOb (conxid, event, symbol, nonce, params) {
-        let market = this.marketId (symbol);
-        let payload = {
-            'command': 'unsubscribe',
-            'channel': market,
-        };
+        if (!this._contextIsSubscribed (contextId, 'trade', symbol)) {
+            let market = this.marketId (symbol);
+            let payload = {
+                'command': 'unsubscribe',
+                'channel': market,
+            };
+            this.websocketSendJson (payload);
+        }
         let nonceStr = nonce.toString ();
         this.emit (nonceStr, true);
-        this.websocketSendJson (payload);
+    }
+
+    _websocketUnsubscribeTrade (conxid, event, symbol, nonce, params) {
+        if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
+            let market = this.marketId (symbol);
+            let payload = {
+                'command': 'unsubscribe',
+                'channel': market,
+            };
+            this.websocketSendJson (payload);
+        }
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
     }
 
     _websocketUnsubscribe (conxid, event, symbol, nonce, params) {
         if (event === 'ob') {
             this._websocketUnsubscribeOb (conxid, event, symbol, nonce, params);
+        } else if (event === 'trade') {
+            this._websocketUnsubscribeTrade (conxid, event, symbol, nonce, params);
         } else {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
