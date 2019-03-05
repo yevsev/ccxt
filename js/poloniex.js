@@ -1218,7 +1218,7 @@ module.exports = class poloniex extends Exchange {
         let side = (trade[2] == 1) ? 'buy' : 'sell';
         let price = parseFloat (trade[3]);
         let amount = parseFloat (trade[4]);
-        let timestamp = trade[5];
+        let timestamp = trade[5] * 1000; // ms resolution
         return {
             'id': id,
             'info': trade,
