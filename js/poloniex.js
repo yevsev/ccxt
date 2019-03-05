@@ -117,6 +117,13 @@ module.exports = class poloniex extends Exchange {
                             'id': '{id}',
                         },
                     },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
             // Fees are tier-based. More info: https://poloniex.com/fees/
@@ -1357,18 +1364,34 @@ module.exports = class poloniex extends Exchange {
         let symbolsIds = this._contextGet (contextId, 'symbolids');
         symbolsIds[market['id2']] = symbol;
         this._contextSet (contextId, 'symbolids', symbolsIds);
-        let payload = {
-            'command': 'subscribe',
-            'channel': market['id'],
-        };
-        let nonceStr = nonce.toString ();
-        this.emit (nonceStr, true);
-        this.websocketSendJson (payload);
+        if (! this._contextIsSubscribed (contextId, 'trade', symbol) {
+            let payload = {
+                'command': 'subscribe',
+                'channel': market['id'],
+            };
+            let nonceStr = nonce.toString ();
+            this.emit (nonceStr, true);
+            this.websocketSendJson (payload);
+        }
+    }
+
+    _websocketSubscribeTrade (contextId, event, symbol, nonce, params = {}) {
+        if (! this._contextIsSubscribed (contextId, 'ob', symbol) {
+            let payload = {
+                'command': 'subscribe',
+                'channel': market['id'],
+            };
+            let nonceStr = nonce.toString ();
+            this.emit (nonceStr, true);
+            this.websocketSendJson (payload);
+        }
     }
 
     _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
         if (event === 'ob') {
             this._websocketSubscribeOb (contextId, event, symbol, nonce, params);
+        } else if (event === 'trade') {
+            this._websocketSubscribeTrade (contextId, event, symbol, nonce, params);
         } else {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
