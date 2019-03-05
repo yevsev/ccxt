@@ -1214,10 +1214,10 @@ module.exports = class poloniex extends Exchange {
 
     _websocketParseTrade (trade, symbol) {
         // Websocket trade format different than REST trade format
-        let id = this.safeString (trade[1]);
+        let id = trade[1];
         let side = (trade[2] == 1) ? 'buy' : 'sell';
-        let price = this.safeFloat (trade[3]);
-        let amount = this.safeFloat (trade[4]);
+        let price = parseFloat (trade[3]);
+        let amount = parseFloat (trade[4]);
         let timestamp = trade[5];
         return {
             'id': id,
