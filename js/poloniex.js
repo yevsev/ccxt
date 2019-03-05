@@ -1212,6 +1212,27 @@ module.exports = class poloniex extends Exchange {
         }
     }
 
+    _websocketParseTrade (trade, symbol) {
+        // Websocket trade format different than REST trade format
+        let id = this.safeString (trade[1]);
+        let side = (trade[2] == 1) ? 'buy' : 'sell';
+        let price = this.safeFloat (trade[3]);
+        let amount = this.safeFloat (trade[4]);
+        let timestamp = trade[5];
+
+        return {
+            'id': id.toString (),
+            'info': trade,
+            'timestamp': timestamp,
+            'datetime': this.iso8601 (timestamp),
+            'symbol': symbol,
+            'type': undefined,
+            'side': side,
+            'price': price,
+            'amount': amount,
+        };
+    }
+
     _websocketHandleOb (contextId, symbol, data) {
         // Poloniex calls this Price Aggregated Book
         // let channelId = data[0];
@@ -1282,7 +1303,12 @@ module.exports = class poloniex extends Exchange {
                         }
                     } else if (order[0] === 't') {
                         // this is not an order but a trade
-                        console.log (this.id + '._websocketHandleOb() skipping trade.');
+                        if (this._contextIsSubscribed (contextId, 'trade', symbol)) {
+                            trade = this._websocketParseTrade(order, symbol);
+                            this.emit ('trade', symbol, trade);
+                        } else {
+                            console.log (this.id + '._websocketHandleOb() skipping trade.');
+                        }
                         continue;
                     } else {
                         // unknown value
