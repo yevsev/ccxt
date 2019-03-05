@@ -1398,7 +1398,7 @@ module.exports = class poloniex extends Exchange {
     }
 
     _websocketUnsubscribeOb (conxid, event, symbol, nonce, params) {
-        if (!this._contextIsSubscribed (contextId, 'trade', symbol)) {
+        if (!this._contextIsSubscribed (conxid, 'trade', symbol)) {
             let market = this.marketId (symbol);
             let payload = {
                 'command': 'unsubscribe',
@@ -1411,7 +1411,7 @@ module.exports = class poloniex extends Exchange {
     }
 
     _websocketUnsubscribeTrade (conxid, event, symbol, nonce, params) {
-        if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
+        if (!this._contextIsSubscribed (conxid, 'ob', symbol)) {
             let market = this.marketId (symbol);
             let payload = {
                 'command': 'unsubscribe',
