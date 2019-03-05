@@ -1219,7 +1219,6 @@ module.exports = class poloniex extends Exchange {
         let price = this.safeFloat (trade[3]);
         let amount = this.safeFloat (trade[4]);
         let timestamp = trade[5];
-
         return {
             'id': id,
             'info': trade,
@@ -1304,7 +1303,7 @@ module.exports = class poloniex extends Exchange {
                     } else if (order[0] === 't') {
                         // this is not an order but a trade
                         if (this._contextIsSubscribed (contextId, 'trade', symbol)) {
-                            trade = this._websocketParseTrade(order, symbol);
+                            let trade = this._websocketParseTrade(order, symbol);
                             this.emit ('trade', symbol, trade);
                         } else {
                             console.log (this.id + '._websocketHandleOb() skipping trade.');
