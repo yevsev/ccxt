@@ -1221,7 +1221,7 @@ module.exports = class poloniex extends Exchange {
         let timestamp = trade[5];
 
         return {
-            'id': id.toString (),
+            'id': id,
             'info': trade,
             'timestamp': timestamp,
             'datetime': this.iso8601 (timestamp),
