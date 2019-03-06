@@ -193,6 +193,13 @@ module.exports = class bittrex extends Exchange {
                             'id': '{id}',
                         },
                     },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}{ConnectionToken}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
         });
@@ -1116,9 +1123,35 @@ module.exports = class bittrex extends Exchange {
         }
     }
 
+    _websocketParseTrade (trade, symbol) {
+        // Websocket trade format different than REST trade format
+        let id = this.safeString(trade, 'FI')
+        let side = 'sell';
+        if (this.safeString(trade, 'OT') === 'BUY') {
+            side = 'buy';
+        }
+        let price = this.safeFloat(trade, 'R');
+        let amount = this.safeFloat(trade, 'Q')
+        let timestamp = this.safeInteger(trade, 'T')
+        return {
+            'id': id,
+            'info': trade,
+            'timestamp': timestamp,
+            'datetime': this.iso8601 (timestamp),
+            'symbol': symbol,
+            'type': undefined,
+            'side': side,
+            'price': price,
+            'amount': amount,
+        };
+    }
+
     _websocketHandleOrderBookSnapshot (contextId, data) {
         let id = this.safeString (data, 'M');
         let symbol = this.findSymbol (id);
+        if (!this._contextIsSubscribed(contextId, 'ob', symbol)) {
+            return;
+        }
         let ob = this.parseOrderBook (data, undefined, 'Z', 'S', 'R', 'Q');
         let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         symbolData['ob'] = ob;
@@ -1130,57 +1163,74 @@ module.exports = class bittrex extends Exchange {
         // {"M":"USDT-BTC","N":912014,"Z":[{"TY":0,"R":3504.97634920,"Q":0.26480207},{"TY":1,"R":3504.97634919,"Q":0.0}],"S":[{"TY":0,"R":3579.37236706,"Q":0.21455380},{"TY":1,"R":6429.20850000,"Q":0.0}],"f":[]}
         let id = this.safeString (data, 'M');
         let symbol = this.findSymbol (id);
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
-        if ('ob' in symbolData) {
-            // snapshot previously received, else throw it
-            let bids = this.safeValue (data, 'Z');
-            let asks = this.safeValue (data, 'S');
-            if (bids !== undefined) {
-                for (let i = 0; i < bids.length; i++) {
-                    let elemType = this.safeInteger (bids[i], 'TY');
-                    let price = this.safeFloat (bids[i], 'R');
-                    let amount = this.safeFloat (bids[i], 'Q');
-                    // 0 = ADD, 1 = REMOVE, 2 = UPDATE
-                    if (elemType === 1) {
-                        this.updateBidAsk ([price, 0], symbolData['ob']['bids'], true);
-                    } else {
-                        this.updateBidAsk ([price, amount], symbolData['ob']['bids'], true);
+        if (this._contextIsSubscribed(contextId, 'ob', symbol)) {
+            let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+            if ('ob' in symbolData) {
+                // snapshot previously received, else throw it
+                let bids = this.safeValue (data, 'Z');
+                let asks = this.safeValue (data, 'S');
+                if (bids !== undefined) {
+                    for (let i = 0; i < bids.length; i++) {
+                        let elemType = this.safeInteger (bids[i], 'TY');
+                        let price = this.safeFloat (bids[i], 'R');
+                        let amount = this.safeFloat (bids[i], 'Q');
+                        // 0 = ADD, 1 = REMOVE, 2 = UPDATE
+                        if (elemType === 1) {
+                            this.updateBidAsk ([price, 0], symbolData['ob']['bids'], true);
+                        } else {
+                            this.updateBidAsk ([price, amount], symbolData['ob']['bids'], true);
+                        }
                     }
                 }
-            }
-            if (asks !== undefined) {
-                for (let i = 0; i < asks.length; i++) {
-                    let elemType = this.safeInteger (asks[i], 'TY');
-                    let price = this.safeFloat (asks[i], 'R');
-                    let amount = this.safeFloat (asks[i], 'Q');
-                    // 0 = ADD, 1 = REMOVE, 2 = UPDATE
-                    if (elemType === 1) {
-                        this.updateBidAsk ([price, 0], symbolData['ob']['asks'], false);
-                    } else {
-                        this.updateBidAsk ([price, amount], symbolData['ob']['asks'], false);
+                if (asks !== undefined) {
+                    for (let i = 0; i < asks.length; i++) {
+                        let elemType = this.safeInteger (asks[i], 'TY');
+                        let price = this.safeFloat (asks[i], 'R');
+                        let amount = this.safeFloat (asks[i], 'Q');
+                        // 0 = ADD, 1 = REMOVE, 2 = UPDATE
+                        if (elemType === 1) {
+                            this.updateBidAsk ([price, 0], symbolData['ob']['asks'], false);
+                        } else {
+                            this.updateBidAsk ([price, amount], symbolData['ob']['asks'], false);
+                        }
                     }
                 }
+                this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit']));
+                this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
             }
-            this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit']));
-            this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+        }
+        if (this._contextIsSubscribed(contextId, 'trade', symbol)) {
+            let fills = this.safeValue(data, 'f');
+            if (fills !== undefined) {
+                for (let i = 0; i < fills.length; i++) {
+                    let trade = this._websocketParseTrade(fills[i], symbol)
+                    this.emit ('trade', symbol, trade);
+                }
+            }
         }
     }
 
     _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
-        if (event !== 'ob') {
+        if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
-        symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
+        if (event === 'ob') {
+            let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+            symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
+            this._contextSetSymbolData (contextId, event, symbol, symbolData);
+        }
         let nonceStr = nonce.toString ();
-        this._contextSetSymbolData (contextId, event, symbol, symbolData);
-        // send request
-        const id = this.marketId (symbol);
-        this.websocketSendJson ({
-            'H': 'c2',
-            'M': 'SubscribeToExchangeDeltas',
-            'A': [id],
-            'I': 'ob-sub_' + nonceStr + '_' + id,
-        });
+        if (!this._contextIsSubscribed(contextId, 'ob', symbol) && !this._contextIsSubscribed(contextId, 'trade', symbol)) {
+            // send request
+            const id = this.marketId (symbol);
+            this.websocketSendJson ({
+                'H': 'c2',
+                'M': 'SubscribeToExchangeDeltas',
+                'A': [id],
+                'I': 'ob-sub_' + nonceStr + '_' + id,
+            });
+        } else {
+            this.emit (nonceStr, true);
+        }
     }
 };
