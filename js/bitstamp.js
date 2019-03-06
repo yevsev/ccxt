@@ -176,6 +176,13 @@ module.exports = class bitstamp extends Exchange {
                             'id': '{id}',
                         },
                     },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
         });
@@ -968,13 +975,20 @@ module.exports = class bitstamp extends Exchange {
     _websocketHandleSubscription (contextId, msg) {
         let chan = this.safeString (msg, 'channel');
         if (chan.indexOf ('order_book') >= 0) {
+            let event = 'ob';
+        } else if (chan.indexOf ('live_trades') >= 0) {
+            let event = 'trade';
+        } else {
+            let event = undefined;
+        }
+        if (typeof event !== 'undefined') {
             let parts = chan.split ('_');
             let id = 'btcusd';
             if (parts.length > 2) {
                 id = parts[2];
             }
             let symbol = this.findSymbol (id);
-            let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+            let symbolData = this._contextGetSymbolData (contextId, event, symbol);
             if ('sub-nonces' in symbolData) {
                 let nonces = symbolData['sub-nonces'];
                 const keys = Object.keys (nonces);
@@ -984,13 +998,13 @@ module.exports = class bitstamp extends Exchange {
                     this.emit (nonce, true);
                 }
                 symbolData['sub-nonces'] = {};
-                this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+                this._contextSetSymbolData (contextId, event, symbol, symbolData);
             }
         }
     }
 
     _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
-        if (event !== 'ob') {
+        if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         // save nonce for subscription response
@@ -1004,7 +1018,11 @@ module.exports = class bitstamp extends Exchange {
         symbolData['sub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         // send request
-        let channel = 'order_book';
+        if (event === 'ob') {
+            let channel = 'order_book';
+        } else if (event === 'trade') {
+            let channel = 'live_trades';
+        }
         if (symbol !== 'BTC/USD') {
             const id = this.marketId (symbol);
             channel = channel + '_' + id;
@@ -1016,10 +1034,14 @@ module.exports = class bitstamp extends Exchange {
     }
 
     _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
-        if (event !== 'ob') {
+        if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let channel = 'order_book';
+        if (event === 'ob') {
+            let channel = 'order_book';
+        } else if (event === 'trade') {
+            let channel = 'live_trades';
+        }
         if (symbol !== 'BTC/USD') {
             const id = this.marketId (symbol);
             channel = channel + '_' + id;
