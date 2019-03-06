@@ -952,6 +952,8 @@ module.exports = class bitstamp extends Exchange {
             if (chan.indexOf ('order_book') >= 0) {
                 this._websocketHandleOrderbook (contextId, msg);
             }
+        } else if (evt === 'trade') {
+            this._websocketHandleTrade (contextId, msg);
         }
     }
 
@@ -970,6 +972,25 @@ module.exports = class bitstamp extends Exchange {
         symbolData['ob'] = ob;
         this.emit ('ob', symbol, this._cloneOrderBook (ob, symbolData['limit']));
         this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+    }
+
+    _websocketHandleTrade (contextId, msg) {
+        // msg example: {'event': 'trade', 'channel': 'live_trades_btceur', 'data': {'microtimestamp': '1551914592860723', 'amount': 0.06388482, 'buy_order_id': 2967695978, 'sell_order_id': 2967695603, 'amount_str': '0.06388482', 'price_str': '3407.43', 'timestamp': '1551914592', 'price': 3407.43, 'type': 0, 'id': 83631877}}
+        console.log (msg)
+        let chan = this.safeString (msg, 'channel');
+        let parts = chan.split ('_');
+        let id = 'btcusd';
+        if (parts.length > 2) {
+            id = parts[2];
+        }
+        let symbol = this.findSymbol (id);
+        //let data = this.safeValue (msg, 'data');
+        //let timestamp = this.safeInteger (data, 'timestamp');
+        //let ob = this.parseOrderBook (data, timestamp * 1000);
+        //let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        //symbolData['ob'] = ob;
+        //this.emit ('ob', symbol, this._cloneOrderBook (ob, symbolData['limit']));
+        //this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
     }
 
     _websocketHandleSubscription (contextId, msg) {
