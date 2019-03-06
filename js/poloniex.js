@@ -117,6 +117,13 @@ module.exports = class poloniex extends Exchange {
                             'id': '{id}',
                         },
                     },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
             // Fees are tier-based. More info: https://poloniex.com/fees/
@@ -1193,6 +1200,8 @@ module.exports = class poloniex extends Exchange {
             let symbolsIds = this._contextGet (contextId, 'symbolids');
             let channelIdStr = channelId.toString ();
             if (channelIdStr in symbolsIds) {
+                // both 'ob' and 'trade' are handled by the same execution branch
+                // as on poloniex they are part of the same endpoint
                 let symbol = symbolsIds[channelIdStr];
                 this._websocketHandleOb (contextId, symbol, msg);
             } else {
@@ -1203,6 +1212,26 @@ module.exports = class poloniex extends Exchange {
         }
     }
 
+    _websocketParseTrade (trade, symbol) {
+        // Websocket trade format different than REST trade format
+        let id = trade[1];
+        let side = (trade[2] == 1) ? 'buy' : 'sell';
+        let price = parseFloat (trade[3]);
+        let amount = parseFloat (trade[4]);
+        let timestamp = trade[5] * 1000; // ms resolution
+        return {
+            'id': id,
+            'info': trade,
+            'timestamp': timestamp,
+            'datetime': this.iso8601 (timestamp),
+            'symbol': symbol,
+            'type': undefined,
+            'side': side,
+            'price': price,
+            'amount': amount,
+        };
+    }
+
     _websocketHandleOb (contextId, symbol, data) {
         // Poloniex calls this Price Aggregated Book
         // let channelId = data[0];
@@ -1210,9 +1239,12 @@ module.exports = class poloniex extends Exchange {
         if (data.length > 2) {
             let orderbook = data[2];
             // let symbol = this.findSymbol (channelId.toString ());
-            let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
             // Check if this is the first response which contains full current orderbook
             if (orderbook[0][0] === 'i') {
+                if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
+                    return;
+                }
+                let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
                 // let currencyPair = orderbook[0][1]['currencyPair'];
                 let fullOrderbook = orderbook[0][1]['orderBook'];
                 let asks = [];
@@ -1270,7 +1302,12 @@ module.exports = class poloniex extends Exchange {
                         }
                     } else if (order[0] === 't') {
                         // this is not an order but a trade
-                        console.log (this.id + '._websocketHandleOb() skipping trade.');
+                        if (this._contextIsSubscribed (contextId, 'trade', symbol)) {
+                            let trade = this._websocketParseTrade(order, symbol);
+                            this.emit ('trade', symbol, trade);
+                        } else {
+                            console.log (this.id + '._websocketHandleOb() skipping trade.');
+                        }
                         continue;
                     } else {
                         // unknown value
@@ -1279,8 +1316,12 @@ module.exports = class poloniex extends Exchange {
                         return;
                     }
                 }
+                if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
+                    return;
+                }
                 // Add to cache
                 orderbookDelta = this.parseOrderBook (orderbookDelta);
+                let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
                 if (typeof (symbolData['obDeltaCache']) === 'undefined') {
                     // This check is necessary because the obDeltaCache will be deleted on a call to fetchOrderBook()
                     symbolData['obDeltaCache'] = {}; // make empty cache
@@ -1353,41 +1394,78 @@ module.exports = class poloniex extends Exchange {
         this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
         // get symbol id2
         // let market = this.marketId (symbol);
-        let market = this.findMarket (symbol);
-        let symbolsIds = this._contextGet (contextId, 'symbolids');
-        symbolsIds[market['id2']] = symbol;
-        this._contextSet (contextId, 'symbolids', symbolsIds);
-        let payload = {
-            'command': 'subscribe',
-            'channel': market['id'],
-        };
+        if (!this._contextIsSubscribed (contextId, 'trade', symbol)) {
+            let market = this.findMarket (symbol);
+            let symbolsIds = this._contextGet (contextId, 'symbolids');
+            symbolsIds[market['id2']] = symbol;
+            this._contextSet (contextId, 'symbolids', symbolsIds);
+            let payload = {
+                'command': 'subscribe',
+                'channel': market['id'],
+            };
+            this.websocketSendJson (payload);
+        }
         let nonceStr = nonce.toString ();
         this.emit (nonceStr, true);
-        this.websocketSendJson (payload);
+    }
+
+    _websocketSubscribeTrade (contextId, event, symbol, nonce, params = {}) {
+        if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
+            let market = this.findMarket (symbol);
+            let symbolsIds = this._contextGet (contextId, 'symbolids');
+            symbolsIds[market['id2']] = symbol;
+            this._contextSet (contextId, 'symbolids', symbolsIds);
+            let payload = {
+                'command': 'subscribe',
+                'channel': market['id'],
+            };
+            this.websocketSendJson (payload);
+        }
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
     }
 
     _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
         if (event === 'ob') {
             this._websocketSubscribeOb (contextId, event, symbol, nonce, params);
+        } else if (event === 'trade') {
+            this._websocketSubscribeTrade (contextId, event, symbol, nonce, params);
         } else {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
     }
 
     _websocketUnsubscribeOb (conxid, event, symbol, nonce, params) {
-        let market = this.marketId (symbol);
-        let payload = {
-            'command': 'unsubscribe',
-            'channel': market,
-        };
+        if (!this._contextIsSubscribed (conxid, 'trade', symbol)) {
+            let market = this.marketId (symbol);
+            let payload = {
+                'command': 'unsubscribe',
+                'channel': market,
+            };
+            this.websocketSendJson (payload);
+        }
         let nonceStr = nonce.toString ();
         this.emit (nonceStr, true);
-        this.websocketSendJson (payload);
+    }
+
+    _websocketUnsubscribeTrade (conxid, event, symbol, nonce, params) {
+        if (!this._contextIsSubscribed (conxid, 'ob', symbol)) {
+            let market = this.marketId (symbol);
+            let payload = {
+                'command': 'unsubscribe',
+                'channel': market,
+            };
+            this.websocketSendJson (payload);
+        }
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
     }
 
     _websocketUnsubscribe (conxid, event, symbol, nonce, params) {
         if (event === 'ob') {
             this._websocketUnsubscribeOb (conxid, event, symbol, nonce, params);
+        } else if (event === 'trade') {
+            this._websocketUnsubscribeTrade (conxid, event, symbol, nonce, params);
         } else {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
