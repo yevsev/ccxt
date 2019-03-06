@@ -1221,7 +1221,7 @@ module.exports = class poloniex extends Exchange {
         let timestamp = trade[5] * 1000; // ms resolution
         return {
             'id': id,
-            'info': trade.splice (1),
+            'info': trade,
             'timestamp': timestamp,
             'datetime': this.iso8601 (timestamp),
             'symbol': symbol,
