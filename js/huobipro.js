@@ -1033,6 +1033,22 @@ module.exports = class huobipro extends Exchange {
         //  else :remove console.log(text);
     }
 
+    _websocketParseTrade (trade, symbol) {
+        // {'amount': 0.01, 'ts': 1551963266001, 'id': 10049953357926186872465, 'price': 3877.04, 'direction': 'sell'}
+        let timestamp = this.safeInteger (trade, 'ts');
+        return {
+            'id': this.safeString(trade, 'id'),
+            'info': trade,
+            'timestamp': timestamp,
+            'datetime': this.iso8601 (timestamp),
+            'symbol': symbol,
+            'type': undefined,
+            'side': this.safeString(trade, 'direction'),
+            'price': this.safeFloat(trade, 'price'),
+            'amount': this.safeFloat(trade, 'amount'),
+        };
+    }
+
     _websocketDispatch (contextId, data) {
         // console.log('received', data.ch, 'data.ts', data.ts, 'crawler.ts', moment().format('x'));
         const ch = this.safeString (data, 'ch');
@@ -1055,6 +1071,14 @@ module.exports = class huobipro extends Exchange {
             this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
             // note, huobipro limit != depth
             this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit']));
+        } else if (channel === 'trade') {
+            // data:
+            // {'ch': 'market.btchusd.trade.detail', 'ts': 1551962828309, 'tick': {'id': 100123237799, 'ts': 1551962828291, 'data': [{'amount': 0.435, 'ts': 1551962828291, 'id': 10012323779926186502443, 'price': 3871.72, 'direction': 'sell'}]}}
+            let multiple_trades = data['tick']['data']
+            for (let i = 0; i < multiple_trades.length; i++) {
+                let trade = this._websocketParseTrade(multiple_trades[i], symbol)
+                this.emit ('trade', symbol, trade)
+            }
         }
         // TODO:kline
         // console.log('kline', data.tick);
