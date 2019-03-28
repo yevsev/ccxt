@@ -702,13 +702,15 @@ module.exports = class bitmex extends Exchange {
         let unsubscribe = this.safeString (msg, 'unsubscribe');
         let status = this.safeInteger (msg, 'status');
         if (typeof subscribe !== 'undefined') {
-            this._websocketHandleSubscription (contextId, 'ob', msg);
+            this._websocketHandleSubscription (contextId, msg);
         } else if (typeof unsubscribe !== 'undefined') {
-            this._websocketHandleUnsubscription (contextId, 'ob', msg);
+            this._websocketHandleUnsubscription (contextId, msg);
         } else if (typeof table !== 'undefined') {
             if (table === 'orderBookL2') {
                 this._websocketHandleOb (contextId, msg);
-            }
+	    } else if (table === 'trade') {
+		    // XXX TODO
+	    }
         } else if (typeof status !== 'undefined') {
             this._websocketHandleError (contextId, msg);
         }
@@ -724,13 +726,20 @@ module.exports = class bitmex extends Exchange {
         this.emit ('err', new ExchangeError (this.id + ' status ' + status + ':' + error), contextId);
     }
 
-    _websocketHandleSubscription (contextId, event, msg) {
+    _websocketHandleSubscription (contextId, msg) {
         let success = this.safeValue (msg, 'success');
         let subscribe = this.safeString (msg, 'subscribe');
         let parts = subscribe.split (':');
         let partsLen = parts.length;
         if (partsLen === 2) {
             if (parts[0] === 'orderBookL2') {
+                var event = 'ob'
+            } else if (parts[0] === 'trade') {
+                var event = 'trade'
+            } else {
+                var event = undefined
+            }
+            if (typeof event !== 'undefined') {
                 let symbol = this.findSymbol (parts[1]);
                 let symbolData = this._contextGetSymbolData (contextId, event, symbol);
                 if ('sub-nonces' in symbolData) {
@@ -748,15 +757,22 @@ module.exports = class bitmex extends Exchange {
         }
     }
 
-    _websocketHandleUnsubscription (contextId, event, msg) {
+    _websocketHandleUnsubscription (contextId, msg) {
         let success = this.safeValue (msg, 'success');
         let unsubscribe = this.safeString (msg, 'unsubscribe');
         let parts = unsubscribe.split (':');
         let partsLen = parts.length;
         if (partsLen === 2) {
             if (parts[0] === 'orderBookL2') {
+                var event = 'ob'
+            } else if (parts[0] === 'trade') {
+                var event = 'trade'
+            } else {
+                var event = undefined
+            }
+            if (typeof event !== 'undefined') {
                 let symbol = this.findSymbol (parts[1]);
-                if (success) {
+                if (success && event === 'ob') {
                     let dbids = this._contextGet (contextId, 'dbids');
                     if (symbol in dbids) {
                         this.omit (dbids, symbol);
@@ -867,12 +883,12 @@ module.exports = class bitmex extends Exchange {
         }
         let id = this.market_id (symbol).toUpperCase ();
         if (event === 'ob') {
-            let payload = {
+            var payload = {
                 'op': 'subscribe',
                 'args': ['orderBookL2:' + id],
             };
         } else if (event === 'trade') {
-            let payload = {
+            var payload = {
                 'op': 'subscribe',
                 'args': ['trade:' + id],
             };
@@ -895,12 +911,12 @@ module.exports = class bitmex extends Exchange {
         }
         let id = this.market_id (symbol).toUpperCase ();
         if (event === 'ob') {
-            let payload = {
+            var payload = {
                 'op': 'unsubscribe',
                 'args': ['orderBookL2:' + id],
             };
         } else if (event === 'trade') {
-            let payload = {
+            var payload = {
                 'op': 'unsubscribe',
                 'args': ['trade:' + id],
             };
