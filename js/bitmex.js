@@ -149,6 +149,13 @@ module.exports = class bitmex extends Exchange {
                             'id': '{id}',
                         },
                     },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
             'exceptions': {
@@ -855,14 +862,21 @@ module.exports = class bitmex extends Exchange {
     }
 
     _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
-        if (event !== 'ob') {
+        if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         let id = this.market_id (symbol).toUpperCase ();
-        let payload = {
-            'op': 'subscribe',
-            'args': ['orderBookL2:' + id],
-        };
+        if (event === 'ob') {
+            let payload = {
+                'op': 'subscribe',
+                'args': ['orderBookL2:' + id],
+            };
+        } else if (event === 'trade') {
+            let payload = {
+                'op': 'subscribe',
+                'args': ['trade:' + id],
+            };
+        }
         let symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (!('sub-nonces' in symbolData)) {
             symbolData['sub-nonces'] = {};
@@ -876,14 +890,21 @@ module.exports = class bitmex extends Exchange {
     }
 
     _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
-        if (event !== 'ob') {
+        if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         let id = this.market_id (symbol).toUpperCase ();
-        let payload = {
-            'op': 'unsubscribe',
-            'args': ['orderBookL2:' + id],
-        };
+        if (event === 'ob') {
+            let payload = {
+                'op': 'unsubscribe',
+                'args': ['orderBookL2:' + id],
+            };
+        } else if (event === 'trade') {
+            let payload = {
+                'op': 'unsubscribe',
+                'args': ['trade:' + id],
+            };
+        }
         let symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (!('unsub-nonces' in symbolData)) {
             symbolData['unsub-nonces'] = {};
