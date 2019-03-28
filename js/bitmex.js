@@ -708,9 +708,9 @@ module.exports = class bitmex extends Exchange {
         } else if (typeof table !== 'undefined') {
             if (table === 'orderBookL2') {
                 this._websocketHandleOb (contextId, msg);
-	    } else if (table === 'trade') {
+            } else if (table === 'trade') {
                 print(msg);
-	    }
+            }
         } else if (typeof status !== 'undefined') {
             this._websocketHandleError (contextId, msg);
         }
