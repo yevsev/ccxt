@@ -709,7 +709,7 @@ module.exports = class bitmex extends Exchange {
             if (table === 'orderBookL2') {
                 this._websocketHandleOb (contextId, msg);
             } else if (table === 'trade') {
-                print(msg);
+                this._websocketHandleTrade (contextId, msg);
             }
         } else if (typeof status !== 'undefined') {
             this._websocketHandleError (contextId, msg);
@@ -792,6 +792,16 @@ module.exports = class bitmex extends Exchange {
                     this._contextSetSymbolData (contextId, event, symbol, symbolData);
                 }
             }
+        }
+    }
+
+    _websocketHandleTrade (contextId, msg) {
+        let data = this.safeValue (msg, 'data');
+        let symbol = this.safeString (data[0], 'symbol');
+        symbol = this.findSymbol (symbol);
+        trades = this.parseTrades(data);
+        for (let t = 0; t < trades.length; t++) {
+            this.emit ('trade', symbol, trades[t]);
         }
     }
 
