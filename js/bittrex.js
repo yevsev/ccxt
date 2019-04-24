@@ -1125,14 +1125,14 @@ module.exports = class bittrex extends Exchange {
 
     _websocketParseTrade (trade, symbol) {
         // Websocket trade format different than REST trade format
-        let id = this.safeString(trade, 'FI')
+        let id = this.safeString (trade, 'FI');
         let side = 'sell';
-        if (this.safeString(trade, 'OT') === 'BUY') {
+        if (this.safeString (trade, 'OT') === 'BUY') {
             side = 'buy';
         }
-        let price = this.safeFloat(trade, 'R');
-        let amount = this.safeFloat(trade, 'Q')
-        let timestamp = this.safeInteger(trade, 'T')
+        let price = this.safeFloat (trade, 'R');
+        let amount = this.safeFloat (trade, 'Q');
+        let timestamp = this.safeInteger (trade, 'T');
         return {
             'id': id,
             'info': trade,
@@ -1149,7 +1149,7 @@ module.exports = class bittrex extends Exchange {
     _websocketHandleOrderBookSnapshot (contextId, data) {
         let id = this.safeString (data, 'M');
         let symbol = this.findSymbol (id);
-        if (!this._contextIsSubscribed(contextId, 'ob', symbol)) {
+        if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
             return;
         }
         let ob = this.parseOrderBook (data, undefined, 'Z', 'S', 'R', 'Q');
@@ -1163,7 +1163,7 @@ module.exports = class bittrex extends Exchange {
         // {"M":"USDT-BTC","N":912014,"Z":[{"TY":0,"R":3504.97634920,"Q":0.26480207},{"TY":1,"R":3504.97634919,"Q":0.0}],"S":[{"TY":0,"R":3579.37236706,"Q":0.21455380},{"TY":1,"R":6429.20850000,"Q":0.0}],"f":[]}
         let id = this.safeString (data, 'M');
         let symbol = this.findSymbol (id);
-        if (this._contextIsSubscribed(contextId, 'ob', symbol)) {
+        if (this._contextIsSubscribed (contextId, 'ob', symbol)) {
             let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
             if ('ob' in symbolData) {
                 // snapshot previously received, else throw it
@@ -1199,11 +1199,11 @@ module.exports = class bittrex extends Exchange {
                 this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
             }
         }
-        if (this._contextIsSubscribed(contextId, 'trade', symbol)) {
-            let fills = this.safeValue(data, 'f');
+        if (this._contextIsSubscribed (contextId, 'trade', symbol)) {
+            let fills = this.safeValue (data, 'f');
             if (fills !== undefined) {
                 for (let i = 0; i < fills.length; i++) {
-                    let trade = this._websocketParseTrade(fills[i], symbol)
+                    let trade = this._websocketParseTrade (fills[i], symbol);
                     this.emit ('trade', symbol, trade);
                 }
             }
@@ -1220,7 +1220,7 @@ module.exports = class bittrex extends Exchange {
             this._contextSetSymbolData (contextId, event, symbol, symbolData);
         }
         let nonceStr = nonce.toString ();
-        if (!this._contextIsSubscribed(contextId, 'ob', symbol) && !this._contextIsSubscribed(contextId, 'trade', symbol)) {
+        if (!this._contextIsSubscribed (contextId, 'ob', symbol) && !this._contextIsSubscribed (contextId, 'trade', symbol)) {
             // send request
             const id = this.marketId (symbol);
             this.websocketSendJson ({

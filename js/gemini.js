@@ -560,8 +560,7 @@ module.exports = class gemini extends Exchange {
                     let size = this.safeFloat (event, 'remaining');
                     let keySide = (side === 'bid') ? 'bids' : 'asks';
                     this.updateBidAsk ([price, size], symbolData['ob'][keySide], side === 'bid');
-                }
-                else if (eventType === 'trade' && ('trade' in subscribedEvents)) {
+                } else if (eventType === 'trade' && ('trade' in subscribedEvents)) {
                     this._websocketHandleTrade (msg, event, symbol);
                 }
             }
