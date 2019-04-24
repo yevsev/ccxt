@@ -1215,7 +1215,7 @@ module.exports = class poloniex extends Exchange {
     _websocketParseTrade (trade, symbol) {
         // Websocket trade format different than REST trade format
         let id = trade[1];
-        let side = (trade[2] == 1) ? 'buy' : 'sell';
+        let side = (trade[2] === 1) ? 'buy' : 'sell';
         let price = parseFloat (trade[3]);
         let amount = parseFloat (trade[4]);
         let timestamp = trade[5] * 1000; // ms resolution
@@ -1303,7 +1303,7 @@ module.exports = class poloniex extends Exchange {
                     } else if (order[0] === 't') {
                         // this is not an order but a trade
                         if (this._contextIsSubscribed (contextId, 'trade', symbol)) {
-                            let trade = this._websocketParseTrade(order, symbol);
+                            let trade = this._websocketParseTrade (order, symbol);
                             this.emit ('trade', symbol, trade);
                         } else {
                             console.log (this.id + '._websocketHandleOb() skipping trade.');

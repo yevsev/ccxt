@@ -731,13 +731,14 @@ module.exports = class bitmex extends Exchange {
         let subscribe = this.safeString (msg, 'subscribe');
         let parts = subscribe.split (':');
         let partsLen = parts.length;
+        let event = undefined;
         if (partsLen === 2) {
             if (parts[0] === 'orderBookL2') {
-                var event = 'ob';
+                event = 'ob';
             } else if (parts[0] === 'trade') {
-                var event = 'trade';
+                event = 'trade';
             } else {
-                var event = undefined;
+                event = undefined;
             }
             if (typeof event !== 'undefined') {
                 let symbol = this.findSymbol (parts[1]);
@@ -762,13 +763,14 @@ module.exports = class bitmex extends Exchange {
         let unsubscribe = this.safeString (msg, 'unsubscribe');
         let parts = unsubscribe.split (':');
         let partsLen = parts.length;
+        let event = undefined;
         if (partsLen === 2) {
             if (parts[0] === 'orderBookL2') {
-                var event = 'ob';
+                event = 'ob';
             } else if (parts[0] === 'trade') {
-                var event = 'trade';
+                event = 'trade';
             } else {
-                var event = undefined;
+                event = undefined;
             }
             if (typeof event !== 'undefined') {
                 let symbol = this.findSymbol (parts[1]);
@@ -797,12 +799,12 @@ module.exports = class bitmex extends Exchange {
 
     _websocketHandleTrade (contextId, msg) {
         let data = this.safeValue (msg, 'data');
-        if (typeof data === 'undefined' || data.length == 0) {
+        if (typeof data === 'undefined' || data.length === 0) {
             return;
         }
         let symbol = this.safeString (data[0], 'symbol');
+        let trades = this.parseTrades (data);
         symbol = this.findSymbol (symbol);
-        trades = this.parseTrades(data);
         for (let t = 0; t < trades.length; t++) {
             this.emit ('trade', symbol, trades[t]);
         }
@@ -812,9 +814,9 @@ module.exports = class bitmex extends Exchange {
         let action = this.safeString (msg, 'action');
         let data = this.safeValue (msg, 'data');
         let symbol = this.safeString (data[0], 'symbol');
-        symbol = this.findSymbol (symbol);
         let dbids = this._contextGet (contextId, 'dbids');
         let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        symbol = this.findSymbol (symbol);
         if (action === 'partial') {
             let ob = {
                 'bids': [],
@@ -895,13 +897,14 @@ module.exports = class bitmex extends Exchange {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         let id = this.market_id (symbol).toUpperCase ();
+        let payload = undefined;
         if (event === 'ob') {
-            var payload = {
+            payload = {
                 'op': 'subscribe',
                 'args': ['orderBookL2:' + id],
             };
         } else if (event === 'trade') {
-            var payload = {
+            payload = {
                 'op': 'subscribe',
                 'args': ['trade:' + id],
             };
@@ -923,13 +926,14 @@ module.exports = class bitmex extends Exchange {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         let id = this.market_id (symbol).toUpperCase ();
+        let payload = undefined;
         if (event === 'ob') {
-            var payload = {
+            payload = {
                 'op': 'unsubscribe',
                 'args': ['orderBookL2:' + id],
             };
         } else if (event === 'trade') {
-            var payload = {
+            payload = {
                 'op': 'unsubscribe',
                 'args': ['trade:' + id],
             };

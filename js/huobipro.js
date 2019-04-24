@@ -1037,15 +1037,15 @@ module.exports = class huobipro extends Exchange {
         // {'amount': 0.01, 'ts': 1551963266001, 'id': 10049953357926186872465, 'price': 3877.04, 'direction': 'sell'}
         let timestamp = this.safeInteger (trade, 'ts');
         return {
-            'id': this.safeString(trade, 'id'),
+            'id': this.safeString (trade, 'id'),
             'info': trade,
             'timestamp': timestamp,
             'datetime': this.iso8601 (timestamp),
             'symbol': symbol,
             'type': undefined,
-            'side': this.safeString(trade, 'direction'),
-            'price': this.safeFloat(trade, 'price'),
-            'amount': this.safeFloat(trade, 'amount'),
+            'side': this.safeString (trade, 'direction'),
+            'price': this.safeFloat (trade, 'price'),
+            'amount': this.safeFloat (trade, 'amount'),
         };
     }
 
@@ -1074,10 +1074,10 @@ module.exports = class huobipro extends Exchange {
         } else if (channel === 'trade') {
             // data:
             // {'ch': 'market.btchusd.trade.detail', 'ts': 1551962828309, 'tick': {'id': 100123237799, 'ts': 1551962828291, 'data': [{'amount': 0.435, 'ts': 1551962828291, 'id': 10012323779926186502443, 'price': 3871.72, 'direction': 'sell'}]}}
-            let multiple_trades = data['tick']['data']
+            let multiple_trades = data['tick']['data'];
             for (let i = 0; i < multiple_trades.length; i++) {
-                let trade = this._websocketParseTrade(multiple_trades[i], symbol)
-                this.emit ('trade', symbol, trade)
+                let trade = this._websocketParseTrade (multiple_trades[i], symbol);
+                this.emit ('trade', symbol, trade);
             }
         }
         // TODO:kline
@@ -1088,6 +1088,7 @@ module.exports = class huobipro extends Exchange {
         if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
+        let ch = undefined;
         if (event === 'ob') {
             let data = this._contextGetSymbolData (contextId, event, symbol);
             // depth from 0 to 5
@@ -1097,9 +1098,9 @@ module.exports = class huobipro extends Exchange {
             // it is not limit
             data['limit'] = this.safeInteger (params, 'limit', 100);
             this._contextSetSymbolData (contextId, event, symbol, data);
-            var ch = '.depth.step' + depth.toString ();
+            ch = '.depth.step' + depth.toString ();
         } else if (event === 'trade') {
-            var ch = '.trade.detail';
+            ch = '.trade.detail';
         }
         const rawsymbol = this.marketId (symbol);
         const sendJson = {
@@ -1115,11 +1116,12 @@ module.exports = class huobipro extends Exchange {
         if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
+        let ch = undefined;
         if (event === 'ob') {
             let depth = this.safeInteger (params, 'depth', 2);
-            var ch = '.depth.step' + depth.toString ();
+            ch = '.depth.step' + depth.toString ();
         } else if (event === 'trade') {
-            var ch = '.trade.detail';
+            ch = '.trade.detail';
         }
         const rawsymbol = this.marketId (symbol);
         const sendJson = {
