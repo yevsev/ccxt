@@ -139,6 +139,7 @@ module.exports = class binance extends Exchange {
                 'methodmap': {
                     'fetchOrderBook': 'fetchOrderBook',
                     '_websocketHandleObRestSnapshot': '_websocketHandleObRestSnapshot',
+                    '_websocketSendHeartbeat': '_websocketSendHeartbeat',
                 },
                 'events': {
                     'ob': {
@@ -1505,7 +1506,7 @@ module.exports = class binance extends Exchange {
             let parameters = this.extend ({
                 'event': element['event'],
                 'symbol': this._websocketMarketId (element['symbol']),
-                'interval': '1m',
+                'interval': this.safeString (params, 'timeframe'),
             }, params);
             let streamGenerator = this.wsconf['events'][element['event']]['conx-param']['stream'];
             streamList.push (this.implodeParams (streamGenerator, parameters));
