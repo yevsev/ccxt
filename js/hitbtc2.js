@@ -1406,31 +1406,32 @@ module.exports = class hitbtc2 extends hitbtc {
         return size === '0' || size === '0.0' || size === '0.00' || size === '0.000' || size === '0.0000';
     }
 
-    _websocketUpdateOrder (items, updates) {
-        let newitems = [];
-        for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            let removeItem = false;
-            for (let j = 0; j < updates.length; j++) {
-                const o = updates[j];
-                if (o['price'] === item['price']) {
+     _websocketUpdateOrder (items, updates) {
+        for ( let j = 0; j < updates.length; j++) {
+            const o = updates[j];
+            let removeItem = -1;
+            let addItem = true;
+            for (let i = 0; i < items.length; i++) {
+                 const item = items[i];
+                 if (o['price'] === item['price']) {
                     if (this._websocketIsZeroSize (o['size'])) {
-                        // remove size === 0
-                        removeItem = true;
-                        // console.log ('htbtc2 remove order',item,o);
+                       removeItem = i;
                     } else {
-                        // update price
-                        // console.log ('htbtc2 update order',item,o);
-                        item['size'] = o['size'];
+                       item['size'] = o['size'];
                     }
-                }
+                    addItem = false;
+                 }
             }
-            if (!removeItem) {
-                newitems.push (item);
+
+            if (removeItem > -1) {
+               items.splice (removeItem,1);
             }
-        }
-        return newitems;
-    }
+            if (addItem) {
+               items.push(o);
+            }
+         } 
+       return items;
+   }
 
     _websocketHandleUpdateOrderbook (contextId, data) {
         const timestamp = undefined;
