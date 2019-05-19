@@ -295,5 +295,4 @@ module.exports = class okex extends okcoinusd {
         }
         return undefined;
     }
-
 };

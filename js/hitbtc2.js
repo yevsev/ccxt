@@ -1482,32 +1482,31 @@ module.exports = class hitbtc2 extends hitbtc {
         return size === '0' || size === '0.0' || size === '0.00' || size === '0.000' || size === '0.0000';
     }
 
-     _websocketUpdateOrder (items, updates) {
-        for ( let j = 0; j < updates.length; j++) {
+    _websocketUpdateOrder (items, updates) {
+        for (let j = 0; j < updates.length; j++) {
             const o = updates[j];
             let removeItem = -1;
             let addItem = true;
             for (let i = 0; i < items.length; i++) {
-                 const item = items[i];
-                 if (o['price'] === item['price']) {
+                const item = items[i];
+                if (o['price'] === item['price']) {
                     if (this._websocketIsZeroSize (o['size'])) {
-                       removeItem = i;
+                        removeItem = i;
                     } else {
-                       item['size'] = o['size'];
+                        item['size'] = o['size'];
                     }
                     addItem = false;
-                 }
+                }
             }
-
             if (removeItem > -1) {
-               items.splice (removeItem,1);
+                items.splice (removeItem, 1);
             }
             if (addItem) {
-               items.push(o);
+                items.push (o);
             }
-         } 
-       return items;
-   }
+        }
+        return items;
+    }
 
     _websocketHandleUpdateOrderbook (contextId, data) {
         const timestamp = undefined;
