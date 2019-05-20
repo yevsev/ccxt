@@ -1347,15 +1347,15 @@ module.exports = class poloniex extends Exchange {
         let channelId = msg[0];
         if (channelId === 1000) {
             // account notification (beta)
-            console.log ('notification');
+            //console.log ('notification');
         } else if (channelId === 1002) {
             // ticker data
-            console.log ('ticker');
+            //console.log ('ticker');
         } else if (channelId === 1003) {
             // 24 hour exchange volume
-            console.log ('24 hour exchange volume');
+            //console.log ('24 hour exchange volume');
         } else if (channelId === 1010) {
-            console.log (this.id + '._websocketOnMessage() heartbeat ' + data);
+            //console.log (this.id + '._websocketOnMessage() heartbeat ' + data);
         } else {
             // if channelId is not one of the above, check if it is a marketId
             let symbolsIds = this._contextGet (contextId, 'symbolids');
@@ -1467,7 +1467,7 @@ module.exports = class poloniex extends Exchange {
                             let trade = this._websocketParseTrade (order, symbol);
                             this.emit ('trade', symbol, trade);
                         } else {
-                            console.log (this.id + '._websocketHandleOb() skipping trade.');
+                            //console.log (this.id + '._websocketHandleOb() skipping trade.');
                         }
                         continue;
                     } else {
