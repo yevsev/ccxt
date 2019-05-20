@@ -1479,7 +1479,7 @@ module.exports = class hitbtc2 extends hitbtc {
 
     _websocketIsZeroSize (size) {
         // hitbtc - their doc is really bad, how many 0 will it have?
-        return size === '0' || size === '0.0' || size === '0.00' || size === '0.000' || size === '0.0000';
+        return size === '0' || size === '0.0' || size === '0.00' || size === '0.000' || size === '0.0000' || size === '0.00000';
     }
 
     _websocketUpdateOrder (items, updates) {
