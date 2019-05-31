@@ -1345,31 +1345,18 @@ module.exports = class poloniex extends Exchange {
     _websocketOnMessage (contextId, data) {
         let msg = JSON.parse (data);
         let channelId = msg[0];
-        if (channelId === 1000) {
-            // account notification (beta)
-            // console.log ('notification');
-        } else if (channelId === 1002) {
-            // ticker data
-            // console.log ('ticker');
-        } else if (channelId === 1003) {
-            // 24 hour exchange volume
-            // console.log ('24 hour exchange volume');
-        } else if (channelId === 1010) {
-            // console.log (this.id + '._websocketOnMessage() heartbeat ' + data);
+        // if channelId is not one of the above, check if it is a marketId
+        let symbolsIds = this._contextGet (contextId, 'symbolids');
+        let channelIdStr = channelId.toString ();
+        if (channelIdStr in symbolsIds) {
+            // both 'ob' and 'trade' are handled by the same execution branch
+            // as on poloniex they are part of the same endpoint
+            let symbol = symbolsIds[channelIdStr];
+            this._websocketHandleOb (contextId, symbol, msg);
         } else {
-            // if channelId is not one of the above, check if it is a marketId
-            let symbolsIds = this._contextGet (contextId, 'symbolids');
-            let channelIdStr = channelId.toString ();
-            if (channelIdStr in symbolsIds) {
-                // both 'ob' and 'trade' are handled by the same execution branch
-                // as on poloniex they are part of the same endpoint
-                let symbol = symbolsIds[channelIdStr];
-                this._websocketHandleOb (contextId, symbol, msg);
-            } else {
-                // Some error occured
-                this.emit ('err', new ExchangeError (this.id + '._websocketOnMessage() failed to get symbol for channelId: ' + channelIdStr));
-                this.websocketClose (contextId);
-            }
+            // Some error occured
+            this.emit ('err', new ExchangeError (this.id + '._websocketOnMessage() failed to get symbol for channelId: ' + channelIdStr));
+            this.websocketClose (contextId);
         }
     }
 
@@ -1466,8 +1453,6 @@ module.exports = class poloniex extends Exchange {
                         if (this._contextIsSubscribed (contextId, 'trade', symbol)) {
                             let trade = this._websocketParseTrade (order, symbol);
                             this.emit ('trade', symbol, trade);
-                        } else {
-                            // console.log (this.id + '._websocketHandleOb() skipping trade.');
                         }
                         continue;
                     } else {
