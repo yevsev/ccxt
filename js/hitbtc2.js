@@ -565,6 +565,13 @@ module.exports = class hitbtc2 extends hitbtc {
                             'id': '{id}',
                         },
                     },
+                    'od': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
         });
@@ -1457,10 +1464,42 @@ module.exports = class hitbtc2 extends hitbtc {
                 // TODO:update orderbook
                 // console.log('update orderbook>>>', orderbook);
                 this._websocketHandleUpdateOrderbook (contextId, msg);
-            }
+            }  else if (method === 'activeOrders') {
+                //console.log('activeorders',msg)
+                this._websocketHandleActiveOrders (contextId, msg);
+            }  else if (method === 'report') {
+                this._websocketHandleReport (contextId, msg);
+            } 
         }
     }
+    
+    _websocketHandleActiveOrders (contextId, data) {
+        const oddata = this.safeValue (data, 'params');
+        let od = this._contextGetSymbolData (contextId, 'od', 'all');
+        if (od['od'] === undefined && oddata.length > 0){ 
+            od['od'] = {}
+        }
+         for (let j = 0; j < oddata.length; j++) {
+            let order = this.parseOrder (oddata[j]);
+            let id = order['id'];
+            od['od'][id] = order;
+         }
+        od['rawData'] = oddata;
 
+        this._contextSetSymbolData (contextId, 'od', 'all', od);
+        this.emit ('od', this._cloneOrders (od['od']));
+    }
+    
+    _websocketHandleReport (contextId, data) {
+        const oddata = this.safeValue (data, 'params');
+        let od = this._contextGetSymbolData (contextId, 'od', 'all');
+        let order = this.parseOrder (oddata);
+        let id = order['id'];
+        od['od'][id] = order;
+        this._contextSetSymbolData (contextId, 'od', 'all', od);
+        this.emit ('od', this._cloneOrders (od['od']));
+    }    
+    
     _websocketHandleSnapshotOrderbook (contextId, data) {
         const timestamp = undefined;
         const obdata = this.safeValue (data, 'params');
@@ -1537,9 +1576,10 @@ module.exports = class hitbtc2 extends hitbtc {
     }
 
     _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
-        if (event !== 'ob') {
+        if (event !== 'ob' && event !== 'od' ) {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
+        if (event === 'ob') {
         let data = this._contextGetSymbolData (contextId, event, symbol);
         // depth from 0 to 5
         // see https://github.com/huobiapi/API_Docs/wiki/WS_api_reference#%E8%AE%A2%E9%98%85-market-depth-%E6%95%B0%E6%8D%AE-marketsymboldepthtype
@@ -1557,6 +1597,27 @@ module.exports = class hitbtc2 extends hitbtc {
             'id': rawsymbol,
         };
         this.websocketSendJson (sendJson);
+        };
+        
+        if (event === 'od') { //Connect using ApiKey/Secret to get order report
+        let data = this._contextGetSymbolData (contextId, event, 'all');
+        data['od'] = undefined
+        this._contextSetSymbolData (contextId, event, 'all', data);
+        const sendLoginJson = {
+            'method': 'login',
+            'params': {
+                'algo': "BASIC",
+                'pKey': this.apiKey,
+                'sKey': this.secret,
+            },
+        };
+        this.websocketSendJson (sendLoginJson);
+        const sendJson = {
+            'method': 'subscribeReports',
+            'params': {},
+        };
+        this.websocketSendJson (sendJson);
+        };
         let nonceStr = nonce.toString ();
         this.emit (nonceStr, true);
     }
@@ -1583,6 +1644,15 @@ module.exports = class hitbtc2 extends hitbtc {
         let data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if ('ob' in data && typeof data['ob'] !== 'undefined') {
             return this._cloneOrderBook (data['ob'], limit);
+        }
+        return undefined;
+    }
+
+    _getCurrentOrders (contextId, id) {
+        
+        let data = this._contextGetSymbolData (contextId, 'od', 'all');
+        if ('od' in data && typeof data['od'] !== 'undefined') {
+            return this._cloneOrders (data['od'], id);
         }
         return undefined;
     }

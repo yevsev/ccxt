@@ -2275,6 +2275,20 @@ module.exports = class Exchange extends EventEmitter{
         }
         return ret;
     }
+    
+    _cloneOrders (od, id = undefined) {
+        let ret =  {
+            'timestamp': od.timestamp,
+            'datetime': od.datetime,
+            'nonce': od.nonce,
+        };
+        if (id === undefined) {
+            ret['orders'] = od
+        } else {
+            ret['orders'] = od[id]
+        }
+        return ret;
+    }
 
     _executeAndCallback (contextId, method, params, callback, context = {}, thisParam = null) {
         try {
@@ -2301,7 +2315,7 @@ module.exports = class Exchange extends EventEmitter{
             });
         } catch (ex) {
             console.log (ex.stack);
-            that.emit ('err', new ExchangeError (that.id + ': error invoking method ' + method + ' in _executeAndCallback: '+ ex), contextId);
+            that.emit ('err', new ExchangeError (this.id + ': error invoking method ' + method + ' in _executeAndCallback: '+ ex), contextId);
         }
     }
 
@@ -2329,6 +2343,30 @@ module.exports = class Exchange extends EventEmitter{
                 reject (ex);
             }
         }), 'websocketFetchOrderBook');
+    }
+    
+    websocketOrders(id = undefined) {
+        return this.timeoutPromise (new Promise (async (resolve, reject) => {
+            try {
+                if (!this._websocketValidEvent('od')) {
+                    reject(new ExchangeError ('Not valid event ob for exchange ' + this.id));
+                    return;
+                }
+                let conxid = await this._websocketEnsureConxActive ('od', 'all', true);
+                let od = this._getCurrentOrders (conxid, id);
+                if (typeof od !== 'undefined') {
+                    resolve (od);
+                    return;
+                }
+                let f = (od) => {
+                    this.removeListener ('od', f);
+                    resolve (this._getCurrentOrders (conxid, id));
+                }
+                this.on ('od', f);
+            } catch (ex) {
+                reject (ex);
+            }
+        }), 'websocketOrders');
     }
 
     async websocketSubscribe (event, symbol, params = {}) {
@@ -2568,6 +2606,10 @@ module.exports = class Exchange extends EventEmitter{
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
         throw new NotSupported ('You must implement _getCurrentWebsocketOrderbook method for exchange ' + this.id);
+    }
+    
+    _getCurrentOrders (contextId, id, limit) {
+        throw new NotSupported ('You must implement _getCurrentOrders method for exchange ' + this.id);
     }
 
     gunzip (data) {
