@@ -3166,16 +3166,16 @@ abstract class Exchange extends CcxtEventEmitter {
         return $ret;
     }
 
-    public function &_cloneOrders ($od, $id = null) {
+    public function &_cloneOrders ($od, $orderid = null) {
         $ret =  array (
             'timestamp'=> $od['timestamp'],
             'datetime' => $od['datetime'],
             'nonce'=> $od['nonce'],
         );
-        if ($id === null) {
+        if ($orderid === null) {
             $ret['orders'] = $od;
         } else {
-            $ret['orders'] = $od[$id];
+            $ret['orders'] = $od[$orderid];
         }
         return $ret;
     }
@@ -3228,12 +3228,12 @@ abstract class Exchange extends CcxtEventEmitter {
         }
     }
     
-    public function websocket_orders($id = null) {
+    public function websocket_orders($orderid = null) {
         if (!$this->_websocketValidEvent('od')) {
             throw new ExchangeError ('Not valid event od for exchange ' . $this->id);
         }
         $conxid = $this->_websocket_ensure_conx_active ('od', 'all', true);
-        $od = $this->_get_current_orders ($conxid, $id);
+        $od = $this->_get_current_orders ($conxid, $orderid);
         if ($od != null) {
             return $od;
         } else {
@@ -3241,9 +3241,9 @@ abstract class Exchange extends CcxtEventEmitter {
             $that = $this;
 
             $f = null;
-            $f = function ($od) use ($that, &$f, $deferred, $id, $conxid){
+            $f = function ($od) use ($that, &$f, $deferred, $orderid, $conxid){
                     $that->removeListener ('od', $f);
-                    $deferred->resolve($this->_get_current_orders ($conxid, $id));
+                    $deferred->resolve($this->_get_current_orders ($conxid, $orderid));
             };
             $this->on ('od', $f);
             Clue\React\Block\await ($this->timeout_promise (

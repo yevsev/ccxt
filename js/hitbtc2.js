@@ -1481,8 +1481,8 @@ module.exports = class hitbtc2 extends hitbtc {
         }
          for (let j = 0; j < oddata.length; j++) {
             let order = this.parseOrder (oddata[j]);
-            let id = order['id'];
-            od['od'][id] = order;
+            let orderid = order['id'];
+            od['od'][orderid] = order;
          }
         od['rawData'] = oddata;
 
@@ -1494,8 +1494,8 @@ module.exports = class hitbtc2 extends hitbtc {
         const oddata = this.safeValue (data, 'params');
         let od = this._contextGetSymbolData (contextId, 'od', 'all');
         let order = this.parseOrder (oddata);
-        let id = order['id'];
-        od['od'][id] = order;
+        let orderid = order['id'];
+        od['od'][orderid] = order;
         this._contextSetSymbolData (contextId, 'od', 'all', od);
         this.emit ('od', this._cloneOrders (od['od']));
     }    
@@ -1648,11 +1648,11 @@ module.exports = class hitbtc2 extends hitbtc {
         return undefined;
     }
 
-    _getCurrentOrders (contextId, id) {
+    _getCurrentOrders (contextId, orderid) {
         
         let data = this._contextGetSymbolData (contextId, 'od', 'all');
         if ('od' in data && typeof data['od'] !== 'undefined') {
-            return this._cloneOrders (data['od'], id);
+            return this._cloneOrders (data['od'], orderid);
         }
         return undefined;
     }

@@ -2276,16 +2276,16 @@ module.exports = class Exchange extends EventEmitter{
         return ret;
     }
     
-    _cloneOrders (od, id = undefined) {
+    _cloneOrders (od, orderid = undefined) {
         let ret =  {
             'timestamp': od.timestamp,
             'datetime': od.datetime,
             'nonce': od.nonce,
         };
-        if (id === undefined) {
+        if (orderid === undefined) {
             ret['orders'] = od
         } else {
-            ret['orders'] = od[id]
+            ret['orders'] = od[orderid]
         }
         return ret;
     }
@@ -2345,7 +2345,7 @@ module.exports = class Exchange extends EventEmitter{
         }), 'websocketFetchOrderBook');
     }
     
-    websocketOrders(id = undefined) {
+    websocketOrders(orderid = undefined) {
         return this.timeoutPromise (new Promise (async (resolve, reject) => {
             try {
                 if (!this._websocketValidEvent('od')) {
@@ -2353,14 +2353,14 @@ module.exports = class Exchange extends EventEmitter{
                     return;
                 }
                 let conxid = await this._websocketEnsureConxActive ('od', 'all', true);
-                let od = this._getCurrentOrders (conxid, id);
+                let od = this._getCurrentOrders (conxid, orderid);
                 if (typeof od !== 'undefined') {
                     resolve (od);
                     return;
                 }
                 let f = (od) => {
                     this.removeListener ('od', f);
-                    resolve (this._getCurrentOrders (conxid, id));
+                    resolve (this._getCurrentOrders (conxid, orderid));
                 }
                 this.on ('od', f);
             } catch (ex) {
