@@ -3165,6 +3165,20 @@ abstract class Exchange extends CcxtEventEmitter {
         }
         return $ret;
     }
+
+    public function &_cloneOrders ($od, $id = null) {
+        $ret =  array (
+            'timestamp'=> $od['timestamp'],
+            'datetime' => $od['datetime'],
+            'nonce'=> $od['nonce'],
+        );
+        if ($id === null) {
+            $ret['orders'] = $od;
+        } else {
+            $ret['orders'] = $od[$id];
+        }
+        return $ret;
+    }
     
     protected function _executeAndCallback ($contextId, $method, $params, $callback, $context = array(), $thisParam = null) {
         $thisParam = ($thisParam !== null) ? $thisParam : $this;
@@ -3211,6 +3225,29 @@ abstract class Exchange extends CcxtEventEmitter {
             $this->on ('ob', $f);
             Clue\React\Block\await ($this->timeout_promise (
                 $deferred->promise(), 'websocket_fetch_order_book'), $this->react_loop);
+        }
+    }
+    
+    public function websocket_orders($id = null) {
+        if (!$this->_websocketValidEvent('od')) {
+            throw new ExchangeError ('Not valid event od for exchange ' . $this->id);
+        }
+        $conxid = $this->_websocket_ensure_conx_active ('od', 'all', true);
+        $od = $this->_get_current_orders ($conxid, $id);
+        if ($od != null) {
+            return $od;
+        } else {
+            $deferred = new \React\Promise\Deferred();
+            $that = $this;
+
+            $f = null;
+            $f = function ($od) use ($that, &$f, $deferred, $id, $conxid){
+                    $that->removeListener ('od', $f);
+                    $deferred->resolve($this->_get_current_orders ($conxid, $id));
+            };
+            $this->on ('od', $f);
+            Clue\React\Block\await ($this->timeout_promise (
+                $deferred->promise(), 'websocket_orders'), $this->react_loop);
         }
     }
 
