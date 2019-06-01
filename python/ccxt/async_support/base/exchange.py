@@ -824,7 +824,7 @@ class Exchange(BaseExchange, EventEmitter):
             ret['bids'] = ob['bids'][:limit]
             ret['asks'] = ob['asks'][:limit]
         return ret
-        
+
     def _cloneOrders(self, od, orderid=None):
         ret = {
             'timestamp': od['timestamp'],
@@ -897,7 +897,6 @@ class Exchange(BaseExchange, EventEmitter):
         self.on('od', wait4orders)
         self.timeout_future(future, 'websocket_orders')
         return await future
-
 
     async def websocket_subscribe(self, event, symbol, params={}):
         await self.websocket_subscribe_all([{

@@ -88,6 +88,7 @@ abstract class Exchange extends CcxtEventEmitter {
     );
 
     public static $exchanges = array (
+        '_1btcxe',
         'acx',
         'allcoin',
         'anxpro',
@@ -223,7 +224,6 @@ abstract class Exchange extends CcxtEventEmitter {
         'yobit',
         'zaif',
         'zb',
-        '_1btcxe',
     );
 
     public static function split ($string, $delimiters = array (' ')) {
