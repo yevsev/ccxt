@@ -2315,7 +2315,7 @@ module.exports = class Exchange extends EventEmitter{
             });
         } catch (ex) {
             console.log (ex.stack);
-            that.emit ('err', new ExchangeError (this.id + ': error invoking method ' + method + ' in _executeAndCallback: '+ ex), contextId);
+            that.emit ('err', new ExchangeError (that.id + ': error invoking method ' + method + ' in _executeAndCallback: '+ ex), contextId);
         }
     }
 
