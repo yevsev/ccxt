@@ -1492,6 +1492,10 @@ module.exports = class hitbtc2 extends hitbtc {
     _websocketHandleReport (contextId, data) {
         const oddata = this.safeValue (data, 'params');
         let od = this._contextGetSymbolData (contextId, 'od', 'all');
+        //status, new, canceled, expired, suspended, trade, replaced
+        if(oddata["reportType"] === 'replaced'){
+            delete od['od'][orderid]['originalRequestClientOrderId'];
+        }
         let order = this.parseOrder (oddata);
         let orderid = order['id'];
         od['od'][orderid] = order;
