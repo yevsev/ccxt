@@ -1423,6 +1423,7 @@ module.exports = class poloniex extends Exchange {
                     'symbol': mktsymbolsIds[msg[1]],
                     'remaining': parseFloat (msg[5]),
                     'filled': 0.0,
+                    'cost': 0.0,
                     'trades': [],
                     'info': msg,
                 };
@@ -1431,8 +1432,6 @@ module.exports = class poloniex extends Exchange {
             } else if (msg[0] === 'o') {
                 if (typeof od['od'][msg[1]] !== 'undefined') {
                     let order = od['od'][msg[1]];
-                    order['cost'] = undefined;
-                    order['filled'] = parseFloat (order['amount'] - msg[2]);
                     order['remaining'] = parseFloat (msg[2]);
                     if (parseFloat (msg[2]) === 0) {
                         order['status'] = 'closed';
@@ -1442,11 +1441,8 @@ module.exports = class poloniex extends Exchange {
                 if (typeof od['od'][msg[1]] !== 'undefined') {
                     let order = od['od'][msg[1]];
                     let trade = this._websocketParseTrade (msg, order['symbol']);
-                    if (typeof order['cost'] === 'undefined') {
-                        order['cost'] = parseFloat (msg[7]);
-                    } else {
-                        order['cost'] = parseFloat (order['cost'] + msg[7]);
-                    }
+                    order['filled'] = parseFloat (order['filled'] + msg[3]);
+                    order['cost'] = parseFloat (order['cost'] + msg[7]);
                     order['trades'].push (trade);
                 }
             } else {
