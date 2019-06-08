@@ -1413,7 +1413,7 @@ module.exports = class poloniex extends Exchange {
         let datareceived = data[2]
         for (var i=0; i < datareceived.length;i++) {
             let msg = datareceived[i]
-            if(msg[0] == 'b'){
+            if(msg[0] === 'b'){
                 //Balance Update ==> Not use at the moment
             } else if (msg[0] === 'n') {
                 //New Order : ["n", <currency pair id>, <t order number>, <order type>, "<rate>", "<amount>", "<date>"]
@@ -1436,7 +1436,7 @@ module.exports = class poloniex extends Exchange {
                 }
                 let orderid = order['id'];
                 od['od'][orderid] = order;
-            } else if (msg[0] == 'o') {
+            } else if (msg[0] === 'o') {
                 if (typeof od['od'][msg[1]] !== 'undefined'){
                     let order = od['od'][msg[1]]
                     order['cost'] = undefined
@@ -1446,7 +1446,7 @@ module.exports = class poloniex extends Exchange {
                         order['status'] = 'closed'
                     } 
                 }
-            } else if (msg[0] == 't') {
+            } else if (msg[0] === 't') {
                 if (typeof od['od'][msg[1]] !== 'undefined'){
                     let order = od['od'][msg[1]]
                     let trade = this._websocketParseTrade(msg,order['symbol'])
