@@ -1361,18 +1361,27 @@ module.exports = class poloniex extends Exchange {
             // as on poloniex they are part of the same endpoint
             let symbol = symbolsIds[channelIdStr];
             this._websocketHandleOb (contextId, symbol, msg);
-        } else if (channelIdStr === 1000 ) {
+        } else if (channelIdStr == 1000 ) {
             //Private Channel
             this._websocketHandleOrders (contextId, msg);
-        } else if (channelIdStr === 1010 ) {
+        } else if (channelIdStr == 1010 ) {
             //Hearthbeat
         } else {
             // Some error occured
+            console.log("error")
             this.emit ('err', new ExchangeError (this.id + '._websocketOnMessage() failed to get symbol for channelId: ' + channelIdStr));
             this.websocketClose (contextId);
         }
     }
-
+    _startDB (){
+        const Store = require("data-store")
+        let path = __dirname + "/../db/"
+        this.db = new Store("Situation", {base: path, debounce: 0});
+        this.db.set("T" + Object.keys(this.db["data"]).length, 'start')
+    }
+      _writeDB (whatever){
+        this.db.set("W" + Object.keys(this.db["data"]).length, whatever)
+    }
     _websocketParseTrade (trade, symbol) {
         // Websocket trade format different than REST trade format
         let id = trade[1];
@@ -1398,7 +1407,7 @@ module.exports = class poloniex extends Exchange {
         if (data[1] == 1) { return } // return if it is only acknowledge of connection
         let mktsymbolsIds = this._contextGet (contextId, 'mktsymbolids');
         let od = this._contextGetSymbolData (contextId, 'od', 'all');
-        if (typeof od['od'] === 'undefined') {
+        if (od['od'] === undefined) {
             od['od'] = {};
         }
         let datareceived = data[2]
@@ -1417,10 +1426,10 @@ module.exports = class poloniex extends Exchange {
                     'status': 'open',
                     'type': 'limit',
                     'side': side,
-                    'price': msg[4],
-                    'amount': msg[5], 
+                    'price': parseFloat(msg[4]),
+                    'amount': parseFloat(msg[5]), 
                     'symbol': mktsymbolsIds[msg[1]],
-                    'remaining': msg[5],
+                    'remaining': parseFloat(msg[5]),
                     'filled' : 0.0,
                     'trades': [],
                     'info': msg
@@ -1431,9 +1440,10 @@ module.exports = class poloniex extends Exchange {
                 if (typeof od['od'][msg[1]] !== 'undefined'){
                     let order = od['od'][msg[1]]
                     order['cost'] = undefined
-                    order['filled'] = order['amount'] - msg[2]
-                    order['remaining'] = msg[2] 
-                    if (msg[2] == 0 ){
+                    order['filled'] = parseFloat(order['amount'] - msg[2])
+                    order['remaining'] = parseFloat(msg[2])
+                    console.log('parsed',parseFloat(msg[2]) )
+                    if (parseFloat(msg[2]) === 0 ){
                         order['status'] = 'closed'
                     } 
                 }
@@ -1441,15 +1451,15 @@ module.exports = class poloniex extends Exchange {
                 if (typeof od['od'][msg[1]] !== 'undefined'){
                     let order = od['od'][msg[1]]
                     let trade = this._websocketParseTrade(msg,order['symbol'])
-                    if (typeof order['cost'] === 'undefined') {
-                        order['cost'] =  msg[7]
+                    if (order['cost'] === undefined) {
+                        order['cost'] =  parseFloat(msg[7])
                     } else {
-                        order['cost'] =  order['cost'] + msg[7]
+                        order['cost'] =  parseFloat(order['cost'] + msg[7])
                     }
                     order['trades'].push (trade)
                 }
             } else {
-                this.emit ('err', new ExchangeError ('Message Type '+msg[0]+' is not handle at the moment'));
+                console.log("Message Type "+msg[0]+" is not handle at the moment")
             }
             
         }
