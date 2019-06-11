@@ -1394,13 +1394,15 @@ module.exports = class poloniex extends Exchange {
     }
 
     _websocketHandleOrders (contextId, data) {
-        if (data[1] === '1') {
-            return;
-        } // return if it is only acknowledge of connection
+        // return if it is only acknowledge of connection
         let mktsymbolsIds = this._contextGet (contextId, 'mktsymbolids');
         let od = this._contextGetSymbolData (contextId, 'od', 'all');
         if (od['od'] === undefined) {
             od['od'] = {};
+        }
+        if (data[1] === 1) {
+            this.emit ('od', this._cloneOrders (od['od']));
+            return 
         }
         let datareceived = data[2];
         for (let i = 0; i < datareceived.length; i++) {
@@ -1433,7 +1435,7 @@ module.exports = class poloniex extends Exchange {
                 if (typeof od['od'][msg[1]] !== 'undefined') {
                     let order = od['od'][msg[1]];
                     order['remaining'] = parseFloat (msg[2]);
-                    if (parseFloat (msg[2]) === 0) {
+                    if (parseFloat (order['remaining']) === 0) {
                         order['status'] = 'closed';
                     }
                 }
@@ -1441,8 +1443,8 @@ module.exports = class poloniex extends Exchange {
                 if (typeof od['od'][msg[1]] !== 'undefined') {
                     let order = od['od'][msg[1]];
                     let trade = this._websocketParseTrade (msg, order['symbol']);
-                    order['filled'] = parseFloat (order['filled'] + msg[3]);
-                    order['cost'] = parseFloat (order['cost'] + msg[7]);
+                    order['filled'] = parseFloat (order['filled']) + parseFloat(msg[3]);
+                    order['cost'] = parseFloat (order['cost']) + parseFloat(msg[7]);
                     order['trades'].push (trade);
                 }
             } else {
