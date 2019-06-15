@@ -1618,6 +1618,9 @@ module.exports = class poloniex extends Exchange {
         if (!this._contextIsSubscribed (contextId, 'trade', symbol)) {
             let market = this.findMarket (symbol);
             let symbolsIds = this._contextGet (contextId, 'symbolids');
+            if(typeof symbolsIds === 'undefined'){
+                symbolsIds = {}
+            }
             symbolsIds[market['id2']] = symbol;
             this._contextSet (contextId, 'symbolids', symbolsIds);
             let payload = {
