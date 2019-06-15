@@ -1432,21 +1432,19 @@ module.exports = class poloniex extends Exchange {
                 let orderid = order['id'];
                 od['od'][orderid] = order;
             } else if (msg[0] === 'o') {
-                if (typeof od['od'][msg[1]] !== 'undefined') {
-                    let order = od['od'][msg[1]];
-                    order['remaining'] = parseFloat (msg[2]);
-                    if (parseFloat (order['remaining']) === 0) {
-                        order['status'] = 'closed';
-                    }
+                let order = this._websocketReturnOrder (od['od'],msg[1],msg);
+                order['remaining'] = parseFloat (msg[2]);
+                if (parseFloat (order['remaining']) === 0) {
+                    order['status'] = 'closed';
                 }
+                od['od'][msg[1]] = order;
             } else if (msg[0] === 't') {
-                if (typeof od['od'][msg[1]] !== 'undefined') {
-                    let order = od['od'][msg[1]];
-                    let trade = this._websocketParseTrade (msg, order['symbol']);
-                    order['filled'] = parseFloat (order['filled']) + parseFloat(msg[3]);
-                    order['cost'] = parseFloat (order['cost']) + parseFloat(msg[7]);
-                    order['trades'].push (trade);
-                }
+                let order = this._websocketReturnOrder (od['od'],msg[6],msg);
+                let trade = this._websocketParseTrade (msg, order['symbol']);
+                order['filled'] = parseFloat (order['filled']) + parseFloat(msg[3]);
+                order['cost'] = parseFloat (order['cost']) + parseFloat(msg[7]);
+                order['trades'].push (trade);
+                od['od'][msg[6]] = order;
             } else {
                 this.emit ('err', new ExchangeError ('Message Type ' + msg[0] + ' is not handle at the moment'));
             }
@@ -1454,7 +1452,22 @@ module.exports = class poloniex extends Exchange {
         this._contextSetSymbolData (contextId, 'od', 'all', od);
         this.emit ('od', this._cloneOrders (od['od']));
     }
-
+    _websocketReturnOrder (orders,orderId,msg) {
+        //Return the order if it exist or a dummy order to keep track of what we receive
+        if (typeof orders[orderId] !== 'undefined'){
+            return orders[orderId]
+        } else {
+            return {
+                'id': orderId,
+                'status': 'open',
+                'remaining': 0.0,
+                'filled': 0.0,
+                'cost': 0.0,
+                'trades': [],
+                'info': msg
+            }
+        }
+    }
     _websocketHandleOb (contextId, symbol, data) {
         // Poloniex calls this Price Aggregated Book
         // let channelId = data[0];
