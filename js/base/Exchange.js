@@ -2196,6 +2196,13 @@ module.exports = class Exchange extends EventEmitter{
         websocketConxInfo['conx'].sendJson(data);
     }
 
+    websocketSendPing (data, conxid = 'default') {
+        let websocketConxInfo = this._contextGetConnectionInfo(conxid);
+        if (this.verbose)
+            console.log (conxid + "-> PING " + data);
+        websocketConxInfo['conx'].sendPing(data);
+    }
+
     async _websocketInitialize (websocketConfig, conxid = 'default') {
         let websocketConnectionInfo = {
             'auth': false,
@@ -2238,6 +2245,15 @@ module.exports = class Exchange extends EventEmitter{
                 console.log (conxid + '<-' + data);
             try {
                 this._websocketOnMessage (conxid, data);
+            } catch (ex) {
+                this.emit ('err', ex, conxid);
+            }
+        });
+        websocketConnectionInfo['conx'].on ('pong', (data) => {
+            if (this.verbose)
+                console.log (conxid + '<- PONG ' + data);
+            try {
+                this._websocketOnPong (conxid, data);
             } catch (ex) {
                 this.emit ('err', ex, conxid);
             }
@@ -2503,6 +2519,9 @@ module.exports = class Exchange extends EventEmitter{
     }
 
     _websocketOnMessage (contextId, data) {
+    }
+
+    _websocketOnPong (contextId, data) {
     }
 
     _websocketOnClose (contextId) {

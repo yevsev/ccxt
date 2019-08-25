@@ -739,6 +739,13 @@ class Exchange(BaseExchange, EventEmitter):
             sys.stdout.flush()
         websocket_conx_info['conx'].send(data)
 
+    def websocketSendPing(self, data, conxid='default'):
+        websocket_conx_info = self._contextGetConnectionInfo(conxid)
+        if self.verbose:
+            print("Async send: PING " + str(data))
+            sys.stdout.flush()
+        websocket_conx_info['conx'].sendPing(data)
+
     def websocketSendJson(self, data, conxid='default'):
         websocket_conx_info = self._contextGetConnectionInfo(conxid)
         if (self.verbose):
@@ -789,6 +796,16 @@ class Exchange(BaseExchange, EventEmitter):
                 sys.stdout.flush()
             try:
                 self._websocket_on_message(conxid, msg)
+            except Exception as ex:
+                self.emit('err', ex, conxid)
+
+        @conx.on('pong')
+        def websocket_connection_pong(data):
+            if self.verbose:
+                print((conxid + '<- PONG ' + data).encode('utf-8'))
+                sys.stdout.flush()
+            try:
+                self._websocket_on_pong(conxid, data)
             except Exception as ex:
                 self.emit('err', ex, conxid)
 
@@ -958,6 +975,9 @@ class Exchange(BaseExchange, EventEmitter):
     def _websocket_on_message(self, contextId, data):
         pass
 
+    def _websocket_on_pong(self, contextId, data):
+        pass
+
     def _websocket_on_close(self, contextId):
         pass
 
@@ -986,6 +1006,10 @@ class Exchange(BaseExchange, EventEmitter):
 
         def f():
             try:
+                print("["+method+"]")
+                print(method)
+                print(params)
+                print(getattr(this_param, method))
                 getattr(this_param, method)(*params)
             except Exception as ex:
                 self.emit('err', ExchangeError(self.id + ': error invoking method ' + method + ' ' + str(ex)), contextId)

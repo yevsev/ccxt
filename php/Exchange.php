@@ -2991,7 +2991,8 @@ abstract class Exchange extends CcxtEventEmitter {
                 if ($this->websocketDelayedConnections[$conxid]['reset']){
                     $this->_websocket_reset_context($conxid, $this->websocketDelayedConnections[$conxid]['conxtpl']);
                 }
-                Clue\React\Block\await($this->websocketConnect($conxid), $this->react_loop);
+                //Clue\React\Block\await($this->websocket_connect($conxid), $this->react_loop);
+                $this->websocket_connect($conxid);
             } catch (Exception $ex) {
             }
         }
@@ -3056,7 +3057,18 @@ abstract class Exchange extends CcxtEventEmitter {
         }
         $this->websocketClose ($conxid);
         $this->_websocket_reset_context($conxid);
-        Clue\React\Block\await ($this->websocket_subscribe_all ($eventSymbols), $this->react_loop);
+        //Clue\React\Block\await ($this->websocket_subscribe_all ($eventSymbols), $this->react_loop);
+        $this->websocket_subscribe_all ($eventSymbols);
+    }
+
+    public function websocketSendPing($sequence, $conxid = 'default'){
+        $websocketConxInfo = &$this->_contextGetConnectionInfo($conxid);
+        if ($this->verbose) {
+            echo ("Websocket send ws PING ");
+            echo ($sequence);
+            echo ("\n");
+        }
+        $websocketConxInfo['conx']->sendPing($sequence);
     }
 
     public function websocketSend ($data, $conxid = 'default') {
@@ -3129,6 +3141,18 @@ abstract class Exchange extends CcxtEventEmitter {
                 $this->emit ('err', $ex, $conxid);
             }
         });
+        $conx->on ('pong', function ($data) use ($conxid) {
+            if ($this->verbose) {
+                echo ("\n" . $conxid. " <-: PONG ");
+                echo ($data);
+                echo("\n");
+            }
+            try {
+                $this->_websocket_on_pong ($conxid, $data);
+            } catch (Exception $ex) {
+                $this->emit ('err', $ex, $conxid);
+            }
+        });
         $conx->on ('close', function () use ($conxid, &$websocketConnectionInfo) {
             $websocketConnectionInfo['auth'] = false;
             $this->_websocket_on_close($conxid);
@@ -3150,9 +3174,13 @@ abstract class Exchange extends CcxtEventEmitter {
     }
 
     public function &_cloneOrderBook ($ob, $limit = null) {
+//        if (!is_array($ob) || !array_key_exists('timestamp', $ob)){
+//            debug_print_backtrace();
+//            die(var_dump($ob));
+//        }
         $ret =  array (
-            'timestamp'=> $ob['timestamp'],
-            'datetime' => $ob['datetime'],
+            'timestamp'=> array_key_exists('timestamp', $ob) ? $ob['timestamp']:null,
+            'datetime' => array_key_exists('datetime', $ob) ? $ob['datetime']:null,
             'nonce'=> $ob['nonce'],
         );
         if ($limit === null) {
@@ -3238,11 +3266,13 @@ abstract class Exchange extends CcxtEventEmitter {
         // $this->_websocket_subscribe ($conxid, $event, $symbol, $oid, $params);
         // Clue\React\Block\await ($this->timeout_promise (
         //     $deferred->promise(), 'websocket_subscribe'), $this->react_loop);
-        Clue\React\Block\await ($this->websocket_subscribe_all(array(
+
+        //Clue\React\Block\await (
+            $this->websocket_subscribe_all(array(array(
             'event'=> $event,
             'symbol'=> $symbol,
             'params'=> $params
-        )), $this->react_loop);
+        )));//, $this->react_loop);
 
     }
 
@@ -3261,7 +3291,8 @@ abstract class Exchange extends CcxtEventEmitter {
             $conxIds[] = $conxid;
             $this->_contextSetSubscribing($conxid, $event, $symbol, true);
         }
-        Clue\React\Block\await ($this->_websocket_connect_delayed(), $this->react_loop);
+        //Clue\React\Block\await ($this->_websocket_connect_delayed(), $this->react_loop);
+        $this->_websocket_connect_delayed();
 
         for($i=0;$i < count($eventSymbols); $i++){
             $conxid = $conxIds[$i];
@@ -3272,7 +3303,7 @@ abstract class Exchange extends CcxtEventEmitter {
             $oid = $this->nonce();// . '-' . $symbol . '-ob-subscribe';
             $deferred = new \React\Promise\Deferred();
             $that = $this;
-            $this->once (strval($oid), function ($success, $ex = null) use($conxid, $symbol, $that, $deferred, $event) {
+            $this->once (strval($oid), function ($success, $ex = null) use($conxid, $symbol, $that, $deferred, $event, $params) {
                 if ($success) {
                     $that->_contextSetSubscribed($conxid, $event, $symbol, true, $params);
                     $that->_contextSetSubscribing($conxid, $event, $symbol, false);
@@ -3314,11 +3345,13 @@ abstract class Exchange extends CcxtEventEmitter {
         // $this->_websocket_unsubscribe ($conxid, $event, $symbol, $oid, $params);
         // Clue\React\Block\await ($this->timeout_promise (
         //     $deferred->promise(), 'websocket_unsubscribe'), $this->react_loop);
-        Clue\React\Block\await ($this->websocket_unsubscribe_all(array(
+        
+        //Clue\React\Block\await (
+            $this->websocket_unsubscribe_all(array(
             'event'=> $event,
             'symbol'=> $symbol,
             'params'=> $params
-        )), $this->react_loop);
+        ));//, $this->react_loop);
     }
 
     public function websocket_unsubscribe_all ($eventSymbols) {
@@ -3353,7 +3386,8 @@ abstract class Exchange extends CcxtEventEmitter {
                     $deferred->promise(), 'websocket_unsubscribe'), $this->react_loop);
             }
         } finally {
-            Clue\React\Block\await ($this->_websocket_connect_delayed(), $this->react_loop);
+            //Clue\React\Block\await ($this->_websocket_connect_delayed(), $this->react_loop);
+            $this->_websocket_connect_delayed();
         }
     }
 
@@ -3365,6 +3399,8 @@ abstract class Exchange extends CcxtEventEmitter {
     }
 
     protected function _websocket_on_message ($contextId, $data) {
+    }
+    protected function _websocket_on_pong ($contextId, $data) {
     }
 
     protected function _websocket_on_close ($contextId) {

@@ -83,6 +83,12 @@ class WebsocketConnection extends WebsocketBaseConnection {
                                 $that->emit ('err', $err);
                             }
                         });
+                        $conn->on('pong', function($data) use (&$that, $client){
+                            if (!$client->is_closing) {
+                                $that->emit ('pong', $data);
+                            }
+                        });
+
                         $client->ws = $conn;
                         $that->client = &$client;
                         $that->client->connected = true;
@@ -139,5 +145,9 @@ class WebsocketConnection extends WebsocketBaseConnection {
 
     public function isActive() {
         return ($this->client->connected) || ($this->client->connecting);
+    }
+
+    public function sendPing($sequence){
+        $this->client->ws->send(new Ratchet\RFC6455\Messaging\Frame($sequence, true, Ratchet\RFC6455\Messaging\Frame::OP_PING));
     }
 }

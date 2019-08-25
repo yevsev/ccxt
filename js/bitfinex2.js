@@ -197,7 +197,7 @@ module.exports = class bitfinex2 extends bitfinex {
                             'id': '{id}',
                         },
                     },
-                }
+                },
             },
             'options': {
                 'orderTypes': {

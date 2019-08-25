@@ -1062,6 +1062,10 @@ module.exports = class bitmex extends Exchange {
         // this.asyncSendJson (payload);
     }
 
+    _websocketOnPong (contextId, data){
+        console.log ("PONG " + data);
+    }
+
     _websocketOnMessage (contextId, data) {
         // send ping after 5 seconds if not message received
         if (data === 'pong') {
@@ -1088,7 +1092,7 @@ module.exports = class bitmex extends Exchange {
     }
 
     _websocketTimeoutSendPing () {
-        this.websocketSend ('ping');
+        this.websocketSendPing (1);
     }
 
     _websocketHandleError (contextId, msg) {
@@ -1186,8 +1190,8 @@ module.exports = class bitmex extends Exchange {
         let data = this.safeValue (msg, 'data');
         let symbol = this.safeString (data[0], 'symbol');
         let dbids = this._contextGet (contextId, 'dbids');
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         symbol = this.findSymbol (symbol);
+        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (action === 'partial') {
             let ob = {
                 'bids': [],

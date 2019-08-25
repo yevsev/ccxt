@@ -46,6 +46,13 @@ module.exports = class WebsocketConnection extends WebsocketBaseConnection {
                 }
                 reject(error);
             });
+            
+            client.ws.on('pong', (data) => {
+                if (!client.isClosing) {
+                    this.emit('pong', data);
+                }
+                resolve();
+            });
         
             client.ws.on('close', () => {
                 if (!client.isClosing) {
@@ -79,6 +86,12 @@ module.exports = class WebsocketConnection extends WebsocketBaseConnection {
     send (data) {
         if (!this.client.isClosing) {
             this.client.ws.send (data);
+        }
+    }
+
+    sendPing(data) {
+        if (!this.client.isClosing) {
+            this.client.ws.ping (data);
         }
     }
 
