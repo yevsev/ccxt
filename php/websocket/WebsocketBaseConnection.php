@@ -20,4 +20,7 @@ abstract class WebsocketBaseConnection extends CcxtEventEmitter {
     public function sendJson ($data) {
         $this->send (json_encode ($data));
     }
+
+    public function sendPing($sequence){
+    }
 }
