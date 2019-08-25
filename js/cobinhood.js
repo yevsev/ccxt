@@ -1098,26 +1098,26 @@ module.exports = class cobinhood extends Exchange {
         if (!Array.isArray (data)) {
             data = [data];
         }
-        let ohlcvs = [];
-        for (let i = 0; i < data.length; i++) {
-            let d = data[i];
-            let timestamp = parseInt (d[0]);
-            let volume = parseFloat (d[1]);
-            let high = parseFloat (d[2]);
-            let low = parseFloat (d[3]);
-            let open = parseFloat (d[4]);
-            let close = parseFloat (d[5]);
-            let o = [
-                timestamp,
-                open,
-                high,
-                low,
-                close,
-                volume,
-            ];
-            ohlcvs.push (o);
+        let dl = data.length; // Transpiler is bugged
+        if (dl !== 1) {
+            return undefined;
         }
-        this.emit ('ohlcv', symbol, ohlcvs);
+        let d = data[dl - 1];
+        let timestamp = parseInt (d[0]);
+        let volume = parseFloat (d[1]);
+        let high = parseFloat (d[2]);
+        let low = parseFloat (d[3]);
+        let open = parseFloat (d[4]);
+        let close = parseFloat (d[5]);
+        let o = [
+            timestamp,
+            open,
+            high,
+            low,
+            close,
+            volume,
+        ];
+        this.emit ('ohlcv', symbol, o);
     }
 
     _websocketProcessPendingNonces (contextId, nonceKey, event, symbol, success, ex) {

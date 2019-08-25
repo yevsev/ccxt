@@ -145,7 +145,6 @@ module.exports = class binance extends Exchange {
                 'methodmap': {
                     'fetchOrderBook': 'fetchOrderBook',
                     '_websocketHandleObRestSnapshot': '_websocketHandleObRestSnapshot',
-                    '_websocketSendHeartbeat': '_websocketSendHeartbeat',
                 },
                 'events': {
                     'ob': {
