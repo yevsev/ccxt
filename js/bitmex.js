@@ -141,6 +141,7 @@ module.exports = class bitmex extends Exchange {
                 'methodmap': {
                     '_websocketTimeoutSendPing': '_websocketTimeoutSendPing',
                     '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                    '_websocketTimeoutPong': '_websocketTimeoutPong',
                 },
                 'events': {
                     'ob': {
@@ -1044,12 +1045,7 @@ module.exports = class bitmex extends Exchange {
     }
 
     _websocketOnOpen (contextId, websocketOptions) { // eslint-disable-line no-unused-vars
-        let lastTimer = this._contextGet (contextId, 'timer');
-        if (typeof lastTimer !== 'undefined') {
-            this._cancelTimeout (lastTimer);
-        }
-        lastTimer = this._setTimeout (contextId, 5000, this._websocketMethodMap ('_websocketTimeoutSendPing'), []);
-        this._contextSet (contextId, 'timer', lastTimer);
+        this._websocketRestartPingTimer (contextId);
         let dbids = {};
         this._contextSet (contextId, 'dbids', dbids);
         // send auth
@@ -1062,15 +1058,8 @@ module.exports = class bitmex extends Exchange {
         // this.asyncSendJson (payload);
     }
 
-    _websocketOnPong (contextId, data){
-        console.log ("PONG " + data);
-    }
-
     _websocketOnMessage (contextId, data) {
-        // send ping after 5 seconds if not message received
-        if (data === 'pong') {
-            return;
-        }
+        this._websocketRestartPingTimer (contextId);
         let msg = JSON.parse (data);
         let table = this.safeString (msg, 'table');
         let subscribe = this.safeString (msg, 'subscribe');
@@ -1091,14 +1080,57 @@ module.exports = class bitmex extends Exchange {
         }
     }
 
-    _websocketTimeoutSendPing () {
-        this.websocketSendPing (1);
+    _websocketOnPong (contextId, sequence) {
+        console.log ("PONG " + sequence);
+        let sequenceStr = '_' + sequence.toString ();
+        let pongTimers = this._contextGet (contextId, 'pongtimers');
+        if (sequenceStr in pongTimers) {
+            let timer = pongTimers[sequenceStr];
+            this._cancelTimeout (timer);
+            this.omit (timer, pongTimers);
+            this._contextSet (contextId, 'pongtimers', pongTimers);
+        }
+        this._websocketRestartPingTimer (contextId);
+    }
+
+    _websocketTimeoutSendPing (contextId) {
+        let lastSeq = this._contextGet (contextId, 'pingseq');
+        if (typeof lastSeq === 'undefined'){
+            lastSeq = 1;
+        } else {
+            lastSeq = lastSeq + 1;
+        }
+        let sequenceStr = '_' + lastSeq.toString ();
+        console.log ("PING " + lastSeq);
+        this._contextSet (contextId, 'pingseq', lastSeq);
+        this.websocketSendPing (lastSeq);
+        let pongTimers = this._contextGet (contextId, 'pongtimers');
+        if (typeof pongTimer === 'undefined') {
+            pongTimers = [];
+        }
+        let newPongTimer = this._setTimeout (contextId, 5000, this._websocketMethodMap ('_websocketTimeoutPong'), [contextId, lastSeq]);
+        pongTimers[sequenceStr] = newPongTimer;
+        this._contextSet (contextId, 'pongtimers', pongTimers);
+    }
+
+    _websocketTimeoutPong (contextId, sequence){
+        this.emit ('err', new ExchangeError (this.id + ' no pong received for '+ sequence));
     }
 
     _websocketHandleError (contextId, msg) {
         let status = this.safeInteger (msg, 'status');
         let error = this.safeString (msg, 'error');
         this.emit ('err', new ExchangeError (this.id + ' status ' + status + ':' + error), contextId);
+    }
+
+    _websocketRestartPingTimer (contextId) {
+        // reset ping timer
+        let lastTimer = this._contextGet (contextId, 'timer');
+        if (typeof lastTimer !== 'undefined') {
+            this._cancelTimeout (lastTimer);
+        }
+        lastTimer = this._setTimeout (contextId, 6000, this._websocketMethodMap ('_websocketTimeoutSendPing'), [contextId]);
+        this._contextSet (contextId, 'timer', lastTimer);
     }
 
     _websocketHandleSubscription (contextId, msg) {
