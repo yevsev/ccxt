@@ -5,8 +5,11 @@
 
 from ccxt.async_support.base.exchange import Exchange
 import hashlib
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import ArgumentsRequired
+from ccxt.base.errors import NotSupported
+from ccxt.base.errors import NetworkError
 
 
 class therock (Exchange):
@@ -96,6 +99,26 @@ class therock (Exchange):
                         'ZEC': 0,
                         'LTC': 0,
                         'EUR': 0,
+                    },
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'pusher',
+                        'baseurl': 'wss://ws-mt1.pusher.com/app/bb1fafdf79a00453b5af',
+                    },
+                },
+                'methodmap': {
+                    '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
                     },
                 },
             },
@@ -479,3 +502,132 @@ class therock (Exchange):
         if 'errors' in response:
             raise ExchangeError(self.id + ' ' + self.json(response))
         return response
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        # console.log(data)
+        self._websocket_check_sequence(contextId, msg)
+        evt = self.safe_string(msg, 'event')
+        if evt == 'subscription_succeeded':
+            self._websocket_handle_subscription(contextId, msg)
+        elif evt == 'orderbook':
+            self._websocket_handle_orderbook(contextId, msg)
+        elif evt == 'orderbook_diff':
+            self._websocket_handle_orderbook_diff(contextId, msg)
+
+    def _websocket_check_sequence(self, contextId, msg):
+        msgData = self.safe_value(msg, 'data')
+        if msgData is None:
+            return
+        sequeceId = self.safe_integer(msgData, 'sequence')
+        if sequeceId is None:
+            return
+        chan = self.safe_string(msg, 'channel')
+        lastSeqIdData = self._contextGet(contextId, 'sequence')
+        if lastSeqIdData is None:
+            lastSeqIdData = {}
+        if chan in lastSeqIdData:
+            lastSeqId = lastSeqIdData[chan]
+            lastSeqId = self.sum(lastSeqId, 1)
+            if sequeceId != lastSeqId:
+                self.emit('err', NetworkError('sequence error in pusher connection ' + sequeceId + ' != ' + lastSeqId), contextId)
+                return
+        lastSeqIdData[chan] = sequeceId
+        self._contextSet(contextId, 'sequence', lastSeqIdData)
+
+    def _websocket_handle_orderbook(self, contextId, msg):
+        chan = self.safe_string(msg, 'channel')
+        symbol = self.find_symbol(chan)
+        data = self.safe_value(msg, 'data')
+        time = self.safe_string(data, 'time')
+        timestamp = self.parse8601(time)
+        ob = self.parse_order_book(data, timestamp, 'bids', 'asks', 'price', 'amount')
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        symbolData['ob'] = ob
+        self.emit('ob', symbol, self._cloneOrderBook(ob, symbolData['limit']))
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+
+    def _websocket_handle_orderbook_diff(self, contextId, msg):
+        chan = self.safe_string(msg, 'channel')
+        symbol = self.find_symbol(chan)
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if not('ob' in list(symbolData.keys())):
+            # not previous snapshot -> don't process it
+            return
+        data = self.safe_value(msg, 'data')
+        time = self.safe_string(data, 'time')
+        timestamp = self.parse8601(time)
+        price = self.safe_float(data, 'price')
+        amount = self.safe_float(data, 'amount')
+        side = self.safe_string(data, 'side')
+        side = 'bids' if (side == 'bid') else 'asks'
+        self.updateBidAsk([price, amount], symbolData['ob'][side], side == 'bids')
+        symbolData['ob']['timestamp'] = timestamp
+        symbolData['ob']['datetime'] = self.iso8601(timestamp)
+        self.emit('ob', symbol, self._cloneOrderBook(symbolData['ob'], symbolData['limit']))
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+
+    def _websocket_handle_subscription(self, contextId, msg):
+        chan = self.safe_string(msg, 'channel')
+        event = 'ob'
+        if chan == 'currency':
+            event = 'trade'
+        symbol = self.find_symbol(chan)
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if 'sub-nonces' in symbolData:
+            nonces = symbolData['sub-nonces']
+            keys = list(nonces.keys())
+            for i in range(0, len(keys)):
+                nonce = keys[i]
+                self._cancelTimeout(nonces[nonce])
+                self.emit(nonce, True)
+            symbolData['sub-nonces'] = {}
+            self._contextSetSymbolData(contextId, event, symbol, symbolData)
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        # save nonce for subscription response
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if not('sub-nonces' in list(symbolData.keys())):
+            symbolData['sub-nonces'] = {}
+        symbolData['limit'] = self.safe_integer(params, 'limit', None)
+        nonceStr = str(nonce)
+        handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce'])
+        symbolData['sub-nonces'][nonceStr] = handle
+        self._contextSetSymbolData(contextId, event, symbol, symbolData)
+        # remove sequenceId
+        sequenceId = None
+        self._contextSet(contextId, 'sequence', sequenceId)
+        # send request
+        id = self.market_id(symbol)
+        self.websocketSendJson({
+            'event': 'subscribe',
+            'channel': id,
+        }, contextId)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        id = self.market_id(symbol)
+        payload = {
+            'event': 'unsubscribe',
+            'channel': id,
+        }
+        nonceStr = str(nonce)
+        self.websocketSendJson(payload)
+        self.emit(nonceStr, True)
+
+    def _websocket_timeout_remove_nonce(self, contextId, timerNonce, event, symbol, key):
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if key in symbolData:
+            nonces = symbolData[key]
+            if timerNonce in nonces:
+                self.omit(symbolData[key], timerNonce)
+                self._contextSetSymbolData(contextId, event, symbol, symbolData)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

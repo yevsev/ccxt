@@ -4,13 +4,16 @@
 # https://github.com/ccxt/ccxt/blob/master/CONTRIBUTING.md#how-to-contribute-code
 
 from ccxt.async_support.base.exchange import Exchange
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import PermissionDenied
 from ccxt.base.errors import InsufficientFunds
 from ccxt.base.errors import InvalidAddress
 from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import OrderNotFound
+from ccxt.base.errors import NotSupported
 from ccxt.base.errors import InvalidNonce
+from ccxt.base.errors import RequestTimeout
 
 
 class cobinhood (Exchange):
@@ -193,6 +196,49 @@ class cobinhood (Exchange):
             'commonCurrencies': {
                 'SMT': 'SocialMedia.Market',
                 'MTN': 'Motion Token',
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://ws.cobinhood.com/v2/ws',
+                    },
+                },
+                'methodmap': {
+                    '_websocketSendHeartbeat': '_websocketSendHeartbeat',
+                    '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                    '_websocketPongTimeout': '_websocketPongTimeout',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'ticker': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'ohlcv': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
             },
         })
 
@@ -796,3 +842,294 @@ class cobinhood (Exchange):
 
     def nonce(self):
         return self.milliseconds()
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        # console.log(msg)
+        h = self.safe_value(msg, 'h', ['', '', ''])
+        channel = h[0]
+        version = h[1]
+        type = h[2]
+        if version != '2':
+            self.emit('err', ExchangeError(self.id + ' version response :' + version + ' != 2'), contextId)
+            return
+        parts = channel.split('.')
+        id = parts[1]
+        symbol = self.find_symbol(id)
+        if type == 'error':
+            self.emit('err', ExchangeError(self.id + ' error ' + h[3] + ':' + h[4]))
+        elif type == 'pong':
+            pongTimeout = self._contextGet(contextId, 'pongtimeout')
+            self._cancelTimeout(pongTimeout)
+            self.emit('pong')
+        elif channel.find('order-book.') >= 0:
+            if type == 'subscribed':
+                self._websocket_handle_subscription(contextId, 'ob', msg, symbol)
+            elif type == 'unsubscribed':
+                self._websocket_handle_unsubscription(contextId, 'ob', msg, symbol)
+            elif type == 's':
+                self._websocket_handle_order_book_snapshot(contextId, symbol, msg)
+            elif type == 'u':
+                self._websocket_handle_order_book_update(contextId, symbol, msg)
+            else:
+                self.emit('err', ExchangeError(self.id + ' invalid orderbook message :' + type), contextId)
+        elif channel.find('ticker.') >= 0:
+            if type == 'subscribed':
+                self._websocket_handle_subscription(contextId, 'ticker', msg, symbol)
+            elif type == 'unsubscribed':
+                self._websocket_handle_unsubscription(contextId, 'ticker', msg, symbol)
+            elif type == 's':
+                # snapshot???
+                self._websocket_handle_ticker(contextId, symbol, msg)
+            elif type == 'u':
+                self._websocket_handle_ticker(contextId, symbol, msg)
+            else:
+                self.emit('err', ExchangeError(self.id + ' invalid ticker message :' + type), contextId)
+        elif channel.find('trade.') >= 0:
+            if type == 'subscribed':
+                self._websocket_handle_subscription(contextId, 'trade', msg, symbol)
+            elif type == 'unsubscribed':
+                self._websocket_handle_unsubscription(contextId, 'trade', msg, symbol)
+            elif type == 's':
+                # snapshot???
+                self._websocket_handle_trade(contextId, symbol, msg)
+            elif type == 'u':
+                self._websocket_handle_trade(contextId, symbol, msg)
+            else:
+                self.emit('err', ExchangeError(self.id + ' invalid trade message :' + type), contextId)
+        elif channel.find('candle.') >= 0:
+            if type == 'subscribed':
+                self._websocket_handle_subscription(contextId, 'ohlcv', msg, symbol)
+            elif type == 'unsubscribed':
+                self._websocket_handle_unsubscription(contextId, 'ohlcv', msg, symbol)
+            elif type == 's':
+                # snapshot???
+                self._websocket_handle_ohlcv(contextId, symbol, msg)
+            elif type == 'u':
+                self._websocket_handle_ohlcv(contextId, symbol, msg)
+            else:
+                self.emit('err', ExchangeError(self.id + ' invalid ohlcv message :' + type), contextId)
+
+    def _websocket_on_open(self, contextId, params):
+        heartbeatTimer = self._contextGet(contextId, 'heartbeattimer')
+        if heartbeatTimer is not None:
+            self._cancelTimer(heartbeatTimer)
+        heartbeatTimer = self._setTimer(contextId, 60000, self._websocketMethodMap('_websocketSendHeartbeat'), [contextId])
+        self._contextSet(contextId, 'heartbeattimer', heartbeatTimer)
+
+    def _websocket_on_close(self, contextId):
+        heartbeatTimer = self._contextGet(contextId, 'heartbeattimer')
+        if heartbeatTimer is not None:
+            self._cancelTimer(heartbeatTimer)
+
+    def _websocket_pong_timeout(self, contextId):
+        ex = RequestTimeout(self.id + ' does not received pong message after 30 seconds')
+        self.emit('err', ex, contextId)
+
+    def _websocket_send_heartbeat(self, contextId):
+        pongTimeout = self._setTimeout(contextId, 30000, self._websocketMethodMap('_websocketPongTimeout'), [contextId])
+        self._contextSet(contextId, 'pongtimeout', pongTimeout)
+        self.websocketSendJson({
+            'action': 'ping',
+        }, contextId)
+
+    def _websocket_handle_order_book_snapshot(self, contextId, symbol, msg):
+        d = self.safe_value(msg, 'd', {
+            'bids': [],
+            'asks': [],
+        })
+        ob = self.parse_order_book(d, None, 'bids', 'asks', 0, 2)
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        symbolData['ob'] = ob
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+        self.emit('ob', symbol, self._cloneOrderBook(symbolData['ob'], symbolData['limit']))
+
+    def _websocket_handle_order_book_update(self, contextId, symbol, msg):
+        d = self.safe_value(msg, 'd', {
+            'bids': [],
+            'asks': [],
+        })
+        delta = self.parse_order_book(d, None, 'bids', 'asks', 0, 2)
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        symbolData['ob'] = self.mergeOrderBookDeltaDiff(symbolData['ob'], delta)
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+        self.emit('ob', symbol, self._cloneOrderBook(symbolData['ob'], symbolData['limit']))
+
+    def _websocket_handle_ticker(self, contextId, symbol, msg):
+        d = self.safe_value(msg, 'd')
+        timestamp = int(d[0])
+        highestBid = float(d[1])
+        lowestAsk = float(d[2])
+        _24hVolume = float(d[3])
+        _24hLow = float(d[4])
+        _24High = float(d[5])
+        _24hOpen = float(d[6])
+        lastTradePrice = float(d[7])
+        t = {
+            'symbol': symbol,
+            'timestamp': timestamp,
+            'datetime': self.iso8601(timestamp),
+            'high': _24High,
+            'low': _24hLow,
+            'bid': highestBid,
+            'bidVolume': None,
+            'ask': lowestAsk,
+            'askVolume': None,
+            'vwap': None,
+            'open': _24hOpen,
+            'close': lastTradePrice,
+            'last': lastTradePrice,
+            'previousClose': None,
+            'change': None,
+            'percentage': None,
+            'average': None,
+            'baseVolume': _24hVolume,
+            'quoteVolume': None,
+            'info': d,
+        }
+        self.emit('ticker', symbol, t)
+
+    def _websocket_handle_trade(self, contextId, symbol, msg):
+        data = self.safe_value(msg, 'd')
+        if not isinstance(data, list):
+            data = [data]
+        trades = []
+        for i in range(0, len(data)):
+            d = data[i]
+            tradeId = d[0]
+            timestamp = int(d[1])
+            makerSide = d[2]
+            price = float(d[3])
+            amount = float(d[4])
+            cost = price * amount
+            side = 'sell' if (makerSide == 'bid') else 'buy'
+            t = {
+                'info': d,
+                'timestamp': timestamp,
+                'datetime': self.iso8601(timestamp),
+                'symbol': symbol,
+                'id': tradeId,
+                'order': None,
+                'type': None,
+                'side': side,
+                'price': price,
+                'amount': amount,
+                'cost': cost,
+                'fee': None,
+            }
+            trades.append(t)
+        self.emit('trade', symbol, trades)
+
+    def _websocket_handle_ohlcv(self, contextId, symbol, msg):
+        data = self.safe_value(msg, 'd')
+        if not isinstance(data, list):
+            data = [data]
+        ohlcvs = []
+        for i in range(0, len(data)):
+            d = data[i]
+            timestamp = int(d[0])
+            volume = float(d[1])
+            high = float(d[2])
+            low = float(d[3])
+            open = float(d[4])
+            close = float(d[5])
+            o = [
+                timestamp,
+                open,
+                high,
+                low,
+                close,
+                volume,
+            ]
+            ohlcvs.append(o)
+        self.emit('ohlcv', symbol, ohlcvs)
+
+    def _websocket_process_pending_nonces(self, contextId, nonceKey, event, symbol, success, ex):
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if nonceKey in symbolData:
+            nonces = symbolData[nonceKey]
+            keys = list(nonces.keys())
+            for i in range(0, len(keys)):
+                nonce = keys[i]
+                self._cancelTimeout(nonces[nonce])
+                self.emit(nonce, success, ex)
+            symbolData[nonceKey] = {}
+            self._contextSetSymbolData(contextId, event, symbol, symbolData)
+
+    def _websocket_handle_subscription(self, contextId, event, msg, symbol):
+        self._websocket_process_pending_nonces(contextId, 'sub-nonces', event, symbol, True, None)
+
+    def _websocket_handle_unsubscription(self, contextId, event, msg, symbol):
+        self._websocket_process_pending_nonces(contextId, 'unsub-nonces', event, symbol, True, None)
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if (event != 'ob') and(event != 'ticker') and(event != 'trade') and(event != 'ohlcv'):
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        # save nonce for subscription response
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if not('sub-nonces' in list(symbolData.keys())):
+            symbolData['sub-nonces'] = {}
+        id = self.market_id(symbol)
+        payload = {
+            'action': 'subscribe',
+            'trading_pair_id': id,
+        }
+        if event == 'ob':
+            symbolData['limit'] = self.safe_integer(params, 'limit', None)
+            symbolData['precision'] = self.safe_integer(params, 'precision', '1E-6')
+            payload['precision'] = symbolData['precision']
+            payload['type'] = 'order-book'
+        elif event == 'ticker':
+            payload['type'] = 'ticker'
+        elif event == 'trade':
+            payload['type'] = 'trade'
+        elif event == 'ohlcv':
+            symbolData['timeframe'] = self.safe_integer(params, 'timeframe', '1m')
+            payload['type'] = 'candle'
+            payload['timeframe'] = symbolData['timeframe']
+        nonceStr = str(nonce)
+        handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce'])
+        symbolData['sub-nonces'][nonceStr] = handle
+        self._contextSetSymbolData(contextId, event, symbol, symbolData)
+        # send request
+        self.websocketSendJson(payload)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        if (event != 'ob') and(event != 'ticker') and(event != 'trade') and(event != 'ohlcv'):
+            raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if not('unsub-nonces' in list(symbolData.keys())):
+            symbolData['unsub-nonces'] = {}
+        nonceStr = str(nonce)
+        handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces'])
+        symbolData['unsub-nonces'][nonceStr] = handle
+        self._contextSetSymbolData(contextId, event, symbol, symbolData)
+        type = None
+        if event == 'ob':
+            type = 'order-book'
+        elif event == 'ticker':
+            type = 'ticker'
+        elif event == 'trade':
+            type = 'trade'
+        elif event == 'ohlcv':
+            type = 'candle'
+        id = self.market_id(symbol)
+        self.websocketSendJson({
+            'action': 'unsubscribe',
+            'type': type,
+            'trading_pair_id': id,
+        })
+
+    def _websocket_timeout_remove_nonce(self, contextId, timerNonce, event, symbol, key):
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if key in symbolData:
+            nonces = symbolData[key]
+            if timerNonce in nonces:
+                self.omit(symbolData[key], timerNonce)
+                self._contextSetSymbolData(contextId, event, symbol, symbolData)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

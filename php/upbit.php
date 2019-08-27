@@ -139,6 +139,39 @@ class upbit extends Exchange {
                     'KRW' => 0.0005,
                 ),
             ),
+            'wsconf' => array (
+                'conx-tpls' => array (
+                    'default' => array (
+                        'type' => 'ws',
+                        'baseurl' => 'wss://crix-websocket-sg.upbit.com/sockjs/websocket',
+                        'baseurl2' => 'wss://crix-ws.upbit.com/websocket',
+                        'baseurl3' => 'wss://api.upbit.com/websocket/v1',
+                    ),
+                ),
+                'events' => array (
+                    'ob' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                    'ticker' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                    'trade' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                ),
+            ),
             'commonCurrencies' => array (
                 'CPT' => 'Contents Protocol', // conflict with CPT (Cryptaur) https://github.com/ccxt/ccxt/issues/4920
             ),
@@ -1515,5 +1548,204 @@ class upbit extends Exchange {
             }
             throw new ExchangeError ($feedback); // unknown $message
         }
+    }
+
+    public function _websocket_on_message ($contextId, $data) {
+        $msg = json_decode ($data, $as_associative_array = true);
+        // var_dump($msg);
+        $type = $this->safe_string($msg, 'type');
+        $code = $this->safe_string($msg, 'code');
+        // $streamType = $this->safe_string($msg, 'streamType');
+        $id = str_replace ('CRIX.UPBIT.', '', $code);
+        $type = str_replace ('crix', '', $type);
+        $type = strtolower ($type);
+        $symbol = $this->find_symbol($id);
+        if ($type === 'orderbook') {
+            $this->_websocket_handle_order_book ($contextId, $symbol, $msg);
+        } else if ($type === 'trade') {
+            $this->_websocket_handle_trade ($contextId, $symbol, $msg);
+        } else if ($type === 'ticker') {
+            $this->_websocket_handle_ticker ($contextId, $symbol, $msg);
+        }
+    }
+
+    public function _websocket_handle_order_book ($contextId, $symbol, $msg) {
+        $obUnits = $this->safe_value($msg, 'orderbook_units', array ());
+        $timestamp = $this->safe_float($msg, 'timestamp');
+        $ob = array (
+            'bids' => array (),
+            'asks' => array (),
+            'timestamp' => $timestamp,
+            'datetime' => $this->iso8601 ($timestamp),
+            'nonce' => null,
+        );
+        for ($i = 0; $i < count ($obUnits); $i++) {
+            $obUnit = $obUnits[$i];
+            $bidPrice = $this->safe_float($obUnit, 'bid_price');
+            $bidSize = $this->safe_float($obUnit, 'bid_size');
+            $askPrice = $this->safe_float($obUnit, 'ask_price');
+            $askSize = $this->safe_float($obUnit, 'ask_size');
+            $this->updateBidAsk ([$bidPrice, $bidSize], $ob['bids'], true);
+            $this->updateBidAsk ([$askPrice, $askSize], $ob['asks'], false);
+        }
+        $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        $symbolData['ob'] = $ob;
+        $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+        $this->emit ('ob', $symbol, $this->_cloneOrderBook ($symbolData['ob'], $symbolData['limit']));
+    }
+
+    public function _websocket_handle_ticker ($contextId, $symbol, $msg) {
+        //  array ("type":"ticker","code":"BTC-ETH","opening_price":0.02601664,"high_price":0.02615611,"low_price":0.02587020,"trade_price":0.02599133,"prev_closing_price":0.02602994,"acc_trade_price":142.52289604,"$change":"FALL","change_price":0.00003861,"signed_change_price":-0.00003861,"change_rate":0.0014832919,"signed_change_rate":-0.0014832919,"ask_bid":"ASK","trade_volume":39.09714085,"acc_trade_volume":5470.69961159,"trade_date":"20181215","trade_time":"153346","trade_timestamp":1544888026830,"acc_ask_volume":2350.63591821,"acc_bid_volume":3120.06369338,"highest_52_week_price":0.12345678,"highest_52_week_date":"2018-02-01","lowest_52_week_price":0.02460824,"lowest_52_week_date":"2018-12-07","trade_status":null,"market_state":"ACTIVE","market_state_for_ios":null,"is_trading_suspended":false,"delisting_date":null,"market_warning":"NONE","$timestamp":1544888027872,"acc_trade_price_24h":null,"acc_trade_volume_24h":null,"stream_type":"SNAPSHOT")
+        $timestamp = $this->safe_integer($msg, 'trade_timestamp');
+        $previous = $this->safe_float($msg, 'prev_closing_price');
+        $last = $this->safe_float($msg, 'trade_price');
+        $change = $this->safe_float($msg, 'signed_change_price');
+        $percentage = $this->safe_float($msg, 'signed_change_rate');
+        $t = array (
+            'symbol' => $symbol,
+            'timestamp' => $timestamp,
+            'datetime' => $this->iso8601 ($timestamp),
+            'high' => $this->safe_float($msg, 'high_price'),
+            'low' => $this->safe_float($msg, 'low_price'),
+            'bid' => null,
+            'bidVolume' => null,
+            'ask' => null,
+            'askVolume' => null,
+            'vwap' => null,
+            'open' => $this->safe_float($msg, 'opening_price'),
+            'close' => $last,
+            'last' => $last,
+            'previousClose' => $previous,
+            'change' => $change,
+            'percentage' => $percentage,
+            'average' => null,
+            'baseVolume' => $this->safe_float($msg, 'acc_trade_volume_24h'),
+            'quoteVolume' => $this->safe_float($msg, 'acc_trade_price_24h'),
+            'info' => $msg,
+        );
+        $this->emit ('ticker', $symbol, $t);
+    }
+
+    public function _websocket_handle_trade ($contextId, $symbol, $msg) {
+        // array ("prevClosingPrice":0.02602994,"change":"RISE","changePrice":0.00005434,,"type":"crixTrade","code":"CRIX.UPBIT.BTC-ETH",,"streamType":"SNAPSHOT")
+        $id = $this->safe_string($msg, 'sequential_id');
+        $orderId = null;
+        $timestamp = $this->safe_integer($msg, 'trade_timestamp');
+        $side = null;
+        $askOrBid = $this->safe_string($msg, 'ask_bid');
+        if ($askOrBid !== null) {
+            $askOrBid = strtolower ($askOrBid);
+        }
+        if ($askOrBid === 'ask') {
+            $side = 'sell';
+        } else if ($askOrBid === 'bid') {
+            $side = 'buy';
+        }
+        $cost = null;
+        $price = $this->safe_float($msg, 'trade_price');
+        $amount = $this->safe_float($msg, 'trade_volume');
+        if ($amount !== null) {
+            if ($price !== null) {
+                $cost = $price * $amount;
+            }
+        }
+        $trade = array (
+            'id' => $id,
+            'info' => $msg,
+            'order' => $orderId,
+            'timestamp' => $timestamp,
+            'datetime' => $this->iso8601 ($timestamp),
+            'symbol' => $symbol,
+            'type' => 'limit',
+            'side' => $side,
+            'price' => $price,
+            'amount' => $amount,
+            'cost' => $cost,
+            'fee' => null,
+        );
+        $this->emit ('trade', $symbol, [$trade]);
+    }
+
+    public function _websocket_generate_ticket ($contextId, $sEvent, $sSymbol, $subscribe) {
+        $ticket = array (
+            array (
+                'ticket' => 'ram macbook',
+            ),
+            array (
+                'format' => 'DEFAULT',
+            ),
+        );
+        $eventCodes = array ();
+        $subscribedEvents = $this->_websocketContextGetSubscribedEventSymbols ($contextId);
+        for ($i = 0; $i < count ($subscribedEvents); $i++) {
+            $subscribedEvent = $subscribedEvents[$i];
+            $event = $subscribedEvent['event'];
+            $symbol = $subscribedEvent['symbol'];
+            if ($subscribe || ($event !== $sEvent) && ($symbol !== $sSymbol)) {
+                // $id = 'CRIX.UPBIT.' . $this->market_id($symbol);
+                $id = $this->market_id($symbol);
+                if (is_array ($eventCodes) && array_key_exists ($event, $eventCodes)) {
+                    $eventCodes[$event][] = $id;
+                } else {
+                    $eventCodes[$event] = [$id];
+                }
+            }
+        }
+        $events = is_array ($eventCodes) ? array_keys ($eventCodes) : array ();
+        for ($j = 0; $j < count ($events); $j++) {
+            $event = $events[$j];
+            if ($event === 'ob') {
+                $ticket[] = array (
+                    'type' => 'orderbook',
+                    'codes' => $eventCodes[$event],
+                );
+            } else if ($event === 'trade') {
+                $ticket[] = array (
+                    'type' => 'trade',
+                    'codes' => $eventCodes[$event],
+                );
+            } else if ($event === 'ticker') {
+                $ticket[] = array (
+                    'type' => 'ticker',
+                    'codes' => $eventCodes[$event],
+                );
+            }
+        }
+        return $ticket;
+    }
+
+    public function _websocket_subscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if (($event !== 'ob') && ($event !== 'ticker') && ($event !== 'trade')) {
+            throw new NotSupported ('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        // save $nonce for subscription response
+        $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+        $payload = $this->_websocket_generate_ticket ($contextId, $event, $symbol, true);
+        if ($event === 'ob') {
+            $symbolData['limit'] = $this->safe_integer($params, 'limit', null);
+        }
+        $this->_contextSetSymbolData ($contextId, $event, $symbol, $symbolData);
+        // send request
+        $this->websocketSendJson ($payload);
+        $nonceStr = (string) $nonce;
+        $this->emit ($nonceStr, true);
+    }
+
+    public function _websocket_unsubscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if (($event !== 'ob') && ($event !== 'ticker') && ($event !== 'trade')) {
+            throw new NotSupported ('unsubscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        $payload = $this->_websocket_generate_ticket ($contextId, $event, $symbol, false);
+        $nonceStr = (string) $nonce;
+        $this->websocketSendJson ($payload);
+        $this->emit ($nonceStr, true);
+    }
+
+    public function _get_current_websocket_orderbook ($contextId, $symbol, $limit) {
+        $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if ((is_array ($data) && array_key_exists ('ob', $data)) && ($data['ob'] !== null)) {
+            return $this->_cloneOrderBook ($data['ob'], $limit);
+        }
+        return null;
     }
 }

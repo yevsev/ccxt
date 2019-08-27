@@ -82,4 +82,21 @@ class hadax (huobipro):
                 'GET': 'Themis',
                 'HOT': 'Hydro Protocol',
             },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://api.hadax.com/ws',
+                    },
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
+            },
         })

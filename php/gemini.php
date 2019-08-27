@@ -83,6 +83,34 @@ class gemini extends Exchange {
                     'maker' => 0.001,
                 ),
             ),
+            'wsconf' => array (
+                'conx-tpls' => array (
+                    'default' => array (
+                        'type' => 'ws-s',
+                        'baseurl' => 'wss://api.gemini.com/v1/marketdata/',
+                    ),
+                ),
+                'methodmap' => array (
+                    'fetchOrderBook' => 'fetchOrderBook',
+                    '_websocketHandleObRestSnapshot' => '_websocketHandleObRestSnapshot',
+                ),
+                'events' => array (
+                    'ob' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}-{symbol}',
+                        ),
+                    ),
+                    'trade' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}-{symbol}',
+                        ),
+                    ),
+                ),
+            ),
         ));
     }
 
@@ -454,5 +482,177 @@ class gemini extends Exchange {
             'tag' => null,
             'info' => $response,
         );
+    }
+
+    public function _websocket_parse_trade ($trade, $symbol, $encapsulating_msg) {
+        $timestamp = $encapsulating_msg['timestampms'];
+        $price = $this->safe_float($trade, 'price');
+        $amount = $this->safe_float($trade, 'amount');
+        return array (
+            'id' => (string) $trade['tid'],
+            'info' => $trade,
+            'timestamp' => $timestamp,
+            'datetime' => $this->iso8601 ($timestamp),
+            'symbol' => $symbol,
+            'type' => null,
+            'side' => strtolower ($trade['makerSide']),
+            'price' => $price,
+            'cost' => $price * $amount,
+            'amount' => $amount,
+        );
+    }
+
+    public function _websocket_handle_trade ($encapsulating_msg, $event, $symbol) {
+        $trade = $this->_websocket_parse_trade ($event, $symbol, $encapsulating_msg);
+        $this->emit ('trade', $symbol, $trade);
+    }
+
+    public function _websocket_on_message ($contextId, $data) {
+        $msg = json_decode ($data, $as_associative_array = true);
+        // var_dump($msg);
+        $lastSeqId = $this->_contextGet ($contextId, 'sequence_id');
+        $seqId = $this->safe_integer($msg, 'socket_sequence');
+        if ($lastSeqId !== null) {
+            $lastSeqId = $lastSeqId . 1;
+            if ($lastSeqId !== $seqId) {
+                $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $lastSeqId . '+1 !=' . (string) $seqId . ')'), $contextId);
+                return;
+            }
+        }
+        $this->_contextSet ($contextId, 'sequence_id', $seqId);
+        $symbol = $this->_contextGet ($contextId, 'symbol');
+        $msgType = $msg['type'];
+        if ($msgType === 'heartbeat') {
+            return;
+        }
+        if ($msgType === 'update') {
+            $events = $this->safe_value($msg, 'events', array ());
+            $symbolData = null;
+            $obEventActive = false;
+            $subscribedEvents = $this->_contextGetEvents ($contextId);
+            if (is_array ($subscribedEvents) && array_key_exists ('ob', $subscribedEvents)) {
+                $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+                $obEventActive = true;
+                $eventsLength = is_array ($events) ? count ($events) : 0;
+                if ($eventsLength > 0) {
+                    $event = $events[0];
+                    if (($event['type'] === 'change') && ($this->safe_string($event, 'reason') === 'initial')) {
+                        $symbolData['ob'] = array (
+                            'bids' => array (),
+                            'asks' => array (),
+                            'timestamp' => null,
+                            'datetime' => null,
+                        );
+                    } else if ($event['type'] === 'change') {
+                        $timestamp = $this->safe_float($msg, 'timestamp');
+                        $timestamp = $timestamp * 1000;
+                        $symbolData['ob']['timestamp'] = $timestamp;
+                        $symbolData['ob']['datetime'] = $this->iso8601 ($timestamp);
+                    }
+                    $symbolData['ob']['nonce'] = $this->safe_integer($msg, 'eventId');
+                }
+            }
+            for ($i = 0; $i < count ($events); $i++) {
+                $event = $events[$i];
+                $eventType = $event['type'];
+                if (($eventType === 'change') && $obEventActive) {
+                    $side = $this->safe_string($event, 'side');
+                    $price = $this->safe_float($event, 'price');
+                    $size = $this->safe_float($event, 'remaining');
+                    $keySide = ($side === 'bid') ? 'bids' : 'asks';
+                    $this->updateBidAsk ([$price, $size], $symbolData['ob'][$keySide], $side === 'bid');
+                } else if ($eventType === 'trade' && (is_array ($subscribedEvents) && array_key_exists ('trade', $subscribedEvents))) {
+                    $this->_websocket_handle_trade ($msg, $event, $symbol);
+                }
+            }
+            if ($obEventActive) {
+                $this->emit ('ob', $symbol, $this->_cloneOrderBook ($symbolData['ob'], $symbolData['limit'])); // True even with 'trade', as a trade $event has the corresponding ob change $event in the same $events list
+                $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+            }
+        }
+    }
+
+    public function _websocket_subscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob' && $event !== 'trade') {
+            throw new NotSupported ('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        if ($event === 'ob') {
+            $data = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+            $data['limit'] = $this->safe_integer($params, 'limit', null);
+            $this->_contextSetSymbolData ($contextId, $event, $symbol, $data);
+        }
+        $nonceStr = (string) $nonce;
+        $this->emit ($nonceStr, true);
+    }
+
+    public function _websocket_unsubscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob' && $event !== 'trade') {
+            throw new NotSupported ('unsubscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        $nonceStr = (string) $nonce;
+        $this->emit ($nonceStr, true);
+    }
+
+    public function _websocket_on_open ($contextId, $websocketConexConfig) {
+        $undef = null;
+        $this->_contextSet ($contextId, 'sequence_id', $undef);
+        $url = $websocketConexConfig['url'];
+        $parts = explode ('?', $url);
+        $partsLen = is_array ($parts) ? count ($parts) : 0;
+        if ($partsLen > 1) {
+            $params = $parts[1];
+            $parts = explode ('/', $parts[0]);
+            $partsLen = is_array ($parts) ? count ($parts) : 0;
+            $symbol = $parts[$partsLen - 1];
+            $symbol = $this->find_symbol($symbol);
+            $this->_contextSet ($contextId, 'symbol', $symbol);
+            $params = explode ('&', $params);
+            for ($i = 0; $i < count ($params); $i++) {
+                $param = $params[$i];
+                $parts = explode ('=', $param);
+                $partsLen = is_array ($parts) ? count ($parts) : 0;
+                // if ($partsLen > 1) {
+                //     $event = null;
+                //     if ($parts[0] === 'bids') {
+                //         $event = 'ob';
+                //     }
+                //     if (($event !== null) && ($parts[1] === 'true')) {
+                //         $this->_contextSetSubscribed ($contextId, $event, $symbol, true);
+                //         $this->_contextSetSubscribing ($contextId, $event, $symbol, false);
+                //     }
+                //  }
+            }
+        }
+    }
+
+    public function _websocket_generate_url_stream ($events, $options, $params = array ()) {
+        // check all $events has the same $symbol and build parameter list
+        $symbol = null;
+        $urlParams = array (
+            'heartbeat' => 'true',
+            'bids' => 'true',
+            'offers' => 'true',
+            'trades' => 'true',
+        );
+        for ($i = 0; $i < count ($events); $i++) {
+            $event = $events[$i];
+            if (!$symbol) {
+                $symbol = $event['symbol'];
+            } else if ($symbol !== $event['symbol']) {
+                throw new ExchangeError ('invalid configuration => not same $symbol in $event list => ' . $symbol . ' ' . $event['symbol']);
+            }
+            if ($event['event'] !== 'ob' && $event['event'] !== 'trade') {
+                throw new ExchangeError ('invalid configuration => $event not reconigzed ' . $event['event']);
+            }
+        }
+        return $options['url'] . $this->_websocketMarketId ($symbol) . '?' . $this->urlencode ($urlParams);
+    }
+
+    public function _get_current_websocket_orderbook ($contextId, $symbol, $limit) {
+        $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if ((is_array ($data) && array_key_exists ('ob', $data)) && ($data['ob'] !== null)) {
+            return $this->_cloneOrderBook ($data['ob'], $limit);
+        }
+        return null;
     }
 }

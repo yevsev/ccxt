@@ -24,6 +24,26 @@ class coinbasepro extends gdax {
                     'https://support.pro.coinbase.com/customer/en/portal/articles/2945310-fees',
                 ),
             ),
+            'wsconf' => array (
+                'conx-tpls' => array (
+                    'default' => array (
+                        'type' => 'ws',
+                        'baseurl' => 'wss://ws-feed.pro.coinbase.com',
+                    ),
+                ),
+                'methodmap' => array (
+                    '_websocketTimeoutRemoveNonce' => '_websocketTimeoutRemoveNonce',
+                ),
+                'events' => array (
+                    'ob' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                ),
+            ),
         ));
     }
 }

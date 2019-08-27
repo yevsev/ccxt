@@ -94,6 +94,23 @@ class gateio extends Exchange {
                     ),
                 ),
             ),
+            'wsconf' => array (
+                'conx-tpls' => array (
+                    'default' => array (
+                        'type' => 'ws',
+                        'baseurl' => 'wss://ws.gateio.io/v3/',
+                    ),
+                ),
+                'events' => array (
+                    'ob' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                ),
+            ),
             'fees' => array (
                 'trading' => array (
                     'tierBased' => true,
@@ -809,5 +826,77 @@ class gateio extends Exchange {
             }
         }
         return $response;
+    }
+
+    public function _websocket_on_message ($contextId, $data) {
+        $msg = json_decode ($data, $as_associative_array = true);
+        $oid = $this->safe_string($msg, 'id');
+        $method = $this->safe_string($msg, 'method');
+        if ($method === null) {
+            // subscription response
+            // $status = $this->safe_string($msg['result'], 'status');
+            $this->emit ($oid, true);
+        } else {
+            if ($method === 'depth.update') {
+                $this->_websocket_handle_ob ($contextId, $msg);
+            }
+        }
+    }
+
+    public function _websocket_handle_ob ($contextId, $msg) {
+        $params = $this->safe_value($msg, 'params');
+        $clean = $params[0];
+        $ob = $params[1];
+        $symbol = $this->find_symbol(strtolower ($params[2]));
+        if ($clean) {
+            $ob = $this->parse_order_book($ob, null);
+            $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+            $data['ob'] = $ob;
+            $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $data);
+            $this->emit ('ob', $symbol, $this->_cloneOrderBook ($ob, $data['limit']));
+        } else {
+            $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+            $obMerged = $this->mergeOrderBookDelta ($data['ob'], $ob, null);
+            $data['ob'] = $obMerged;
+            $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $data);
+            $this->emit ('ob', $symbol, $this->_cloneOrderBook ($obMerged, $data['limit']));
+        }
+    }
+
+    public function _websocket_subscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob') {
+            throw new NotSupported ('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        $id = strtoupper ($this->market_id ($symbol));
+        $payload = array (
+            'id' => $nonce,
+            'method' => 'depth.subscribe',
+            'params' => [$id, 30, '0.00001'],
+        );
+        $data = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+        $data['limit'] = $this->safe_integer($params, 'limit', null);
+        $this->_contextSetSymbolData ($contextId, $event, $symbol, $data);
+        $this->websocketSendJson ($payload);
+    }
+
+    public function _websocket_unsubscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob') {
+            throw new NotSupported ('unsubscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        $id = strtoupper ($this->market_id ($symbol));
+        $payload = array (
+            'id' => $nonce,
+            'method' => 'depth.unsubscribe',
+            'params' => [$id],
+        );
+        $this->websocketSendJson ($payload);
+    }
+
+    public function _get_current_websocket_orderbook ($contextId, $symbol, $limit) {
+        $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if ((is_array ($data) && array_key_exists ('ob', $data)) && ($data['ob'] !== null)) {
+            return $this->_cloneOrderBook ($data['ob'], $limit);
+        }
+        return null;
     }
 }

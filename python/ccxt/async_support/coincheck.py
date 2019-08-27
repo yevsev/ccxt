@@ -4,6 +4,7 @@
 # https://github.com/ccxt/ccxt/blob/master/CONTRIBUTING.md#how-to-contribute-code
 
 from ccxt.async_support.base.exchange import Exchange
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import NotSupported
 
@@ -72,6 +73,23 @@ class coincheck (Exchange):
                         'exchange/orders/{id}',
                         'withdraws/{id}',
                     ],
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://ws-api.coincheck.com/',
+                    },
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
             'markets': {
@@ -376,3 +394,49 @@ class coincheck (Exchange):
             if response['success']:
                 return response
         raise ExchangeError(self.id + ' ' + self.json(response))
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        id = self.safe_integer({
+            'a': msg[0],
+        }, 'a')
+        if id is None:
+            # orderbook
+            self._websocket_handle_ob(contextId, msg)
+
+    def _websocket_handle_ob(self, contextId, msg):
+        symbol = self.find_symbol(msg[0])
+        ob = msg[1]
+        # just testing
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if not('ob' in list(data.keys())):
+            ob = self.parse_order_book(ob, None)
+            data['ob'] = ob
+            self.emit('ob', symbol, self._cloneOrderBook(ob, data['limit']))
+        else:
+            data['ob'] = self.mergeOrderBookDelta(data['ob'], ob, None)
+            self.emit('ob', symbol, self._cloneOrderBook(data['ob'], data['limit']))
+        self._contextSetSymbolData(contextId, 'ob', symbol, data)
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        payload = {
+            'type': 'subscribe',
+            'channel': self.market_id(symbol) + '-orderbook',
+        }
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        data['limit'] = self.safe_integer(params, 'limit', None)
+        self._contextSetSymbolData(contextId, 'ob', symbol, data)
+        self.websocketSendJson(payload)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

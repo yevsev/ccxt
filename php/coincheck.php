@@ -73,6 +73,23 @@ class coincheck extends Exchange {
                     ),
                 ),
             ),
+            'wsconf' => array (
+                'conx-tpls' => array (
+                    'default' => array (
+                        'type' => 'ws',
+                        'baseurl' => 'wss://ws-api.coincheck.com/',
+                    ),
+                ),
+                'events' => array (
+                    'ob' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                ),
+            ),
             'markets' => array (
                 'BTC/JPY' => array ( 'id' => 'btc_jpy', 'symbol' => 'BTC/JPY', 'base' => 'BTC', 'quote' => 'JPY', 'baseId' => 'btc', 'quoteId' => 'jpy' ), // the only real pair
                 // 'ETH/JPY' => array ( 'id' => 'eth_jpy', 'symbol' => 'ETH/JPY', 'base' => 'ETH', 'quote' => 'JPY', 'baseId' => 'eth', 'quoteId' => 'jpy' ),
@@ -410,5 +427,60 @@ class coincheck extends Exchange {
             if ($response['success'])
                 return $response;
         throw new ExchangeError ($this->id . ' ' . $this->json ($response));
+    }
+
+    public function _websocket_on_message ($contextId, $data) {
+        $msg = json_decode ($data, $as_associative_array = true);
+        $id = $this->safe_integer(array (
+            'a' => $msg[0],
+        ), 'a');
+        if ($id === null) {
+            // orderbook
+            $this->_websocket_handle_ob ($contextId, $msg);
+        }
+    }
+
+    public function _websocket_handle_ob ($contextId, $msg) {
+        $symbol = $this->find_symbol($msg[0]);
+        $ob = $msg[1];
+        // just testing
+        $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if (!(is_array ($data) && array_key_exists ('ob', $data))) {
+            $ob = $this->parse_order_book($ob, null);
+            $data['ob'] = $ob;
+            $this->emit ('ob', $symbol, $this->_cloneOrderBook ($ob, $data['limit']));
+        } else {
+            $data['ob'] = $this->mergeOrderBookDelta ($data['ob'], $ob, null);
+            $this->emit ('ob', $symbol, $this->_cloneOrderBook ($data['ob'], $data['limit']));
+        }
+        $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $data);
+    }
+
+    public function _websocket_subscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob') {
+            throw new NotSupported ('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        $payload = array (
+            'type' => 'subscribe',
+            'channel' => $this->market_id($symbol) . '-orderbook',
+        );
+        $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        $data['limit'] = $this->safe_integer($params, 'limit', null);
+        $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $data);
+        $this->websocketSendJson ($payload);
+        $nonceStr = (string) $nonce;
+        $this->emit ($nonceStr, true);
+    }
+
+    public function _websocket_unsubscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        throw new NotSupported ('unsubscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+    }
+
+    public function _get_current_websocket_orderbook ($contextId, $symbol, $limit) {
+        $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if ((is_array ($data) && array_key_exists ('ob', $data)) && ($data['ob'] !== null)) {
+            return $this->_cloneOrderBook ($data['ob'], $limit);
+        }
+        return null;
     }
 }

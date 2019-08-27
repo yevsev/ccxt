@@ -165,6 +165,33 @@ class bitstamp extends Exchange {
                     'Ensure this value has at least' => '\\ccxt\\InvalidAddress', // Ensure this value has at least 25 characters (it has 4).
                 ),
             ),
+            'wsconf' => array (
+                'conx-tpls' => array (
+                    'default' => array (
+                        'type' => 'pusher',
+                        'baseurl' => 'wss://ws-mt1.pusher.com:443/app/de504dc5763aeef9ff52',
+                    ),
+                ),
+                'methodmap' => array (
+                    '_websocketTimeoutRemoveNonce' => '_websocketTimeoutRemoveNonce',
+                ),
+                'events' => array (
+                    'ob' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                    'trade' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                ),
+            ),
         ));
     }
 
@@ -1050,5 +1077,175 @@ class bitstamp extends Exchange {
             }
             throw new ExchangeError ($feedback);
         }
+    }
+
+    public function _websocket_on_message ($contextId, $data) {
+        $msg = json_decode ($data, $as_associative_array = true);
+        // var_dump($data);
+        $evt = $this->safe_string($msg, 'event');
+        if ($evt === 'subscription_succeeded') {
+            $this->_websocket_handle_subscription ($contextId, $msg);
+        } else if ($evt === 'data') {
+            $chan = $this->safe_string($msg, 'channel');
+            if (mb_strpos ($chan, 'order_book') !== false) {
+                $this->_websocket_handle_orderbook ($contextId, $msg);
+            }
+        } else if ($evt === 'trade') {
+            $this->_websocket_handle_trade ($contextId, $msg);
+        }
+    }
+
+    public function _websocket_handle_orderbook ($contextId, $msg) {
+        $chan = $this->safe_string($msg, 'channel');
+        $parts = explode ('_', $chan);
+        $id = 'btcusd';
+        if (strlen ($parts) > 2) {
+            $id = $parts[2];
+        }
+        $symbol = $this->find_symbol($id);
+        $data = $this->safe_value($msg, 'data');
+        $timestamp = $this->safe_integer($data, 'timestamp');
+        $ob = $this->parse_order_book($data, $timestamp * 1000);
+        $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        $symbolData['ob'] = $ob;
+        $this->emit ('ob', $symbol, $this->_cloneOrderBook ($ob, $symbolData['limit']));
+        $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+    }
+
+    public function _websocket_parse_trade ($data, $symbol) {
+        $timestamp_ms = intval ($this->safe_integer($data, 'microtimestamp') / 1000);
+        $side = $this->safe_string($data, 'type');
+        if ($side !== null) {
+            $side = ($side === '1') ? 'sell' : 'buy';
+        }
+        return array (
+            'id' => $this->safe_string($data, 'id'),
+            'info' => $data,
+            'timestamp' => $timestamp_ms,
+            'datetime' => $this->iso8601 ($timestamp_ms),
+            'symbol' => $symbol,
+            'type' => null,
+            'side' => $side,
+            'price' => $this->safe_float($data, 'price'),
+            'amount' => $this->safe_float($data, 'amount'),
+        );
+    }
+
+    public function _websocket_handle_trade ($contextId, $msg) {
+        // $msg example => array ('event' => 'trade', 'channel' => 'live_trades_btceur', 'data' => {'microtimestamp' => '1551914592860723', 'amount' => 0.06388482, 'buy_order_id' => 2967695978, 'sell_order_id' => 2967695603, 'amount_str' => '0.06388482', 'price_str' => '3407.43', 'timestamp' => '1551914592', 'price' => 3407.43, 'type' => 0, 'id' => 83631877)}
+        $chan = $this->safe_string($msg, 'channel');
+        $parts = explode ('_', $chan);
+        $id = 'btcusd';
+        if (strlen ($parts) > 2) {
+            $id = $parts[2];
+        }
+        $symbol = $this->find_symbol($id);
+        $data = $this->safe_value($msg, 'data');
+        $trade = $this->_websocket_parse_trade ($data, $symbol);
+        $this->emit ('trade', $symbol, $trade);
+    }
+
+    public function _websocket_handle_subscription ($contextId, $msg) {
+        $chan = $this->safe_string($msg, 'channel');
+        $event = null;
+        if (mb_strpos ($chan, 'order_book') !== false) {
+            $event = 'ob';
+        } else if (mb_strpos ($chan, 'live_trades') !== false) {
+            $event = 'trade';
+        } else {
+            $event = null;
+        }
+        if ($event !== null) {
+            $parts = explode ('_', $chan);
+            $id = 'btcusd';
+            if (strlen ($parts) > 2) {
+                $id = $parts[2];
+            }
+            $symbol = $this->find_symbol($id);
+            $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+            if (is_array ($symbolData) && array_key_exists ('sub-nonces', $symbolData)) {
+                $nonces = $symbolData['sub-nonces'];
+                $keys = is_array ($nonces) ? array_keys ($nonces) : array ();
+                for ($i = 0; $i < count ($keys); $i++) {
+                    $nonce = $keys[$i];
+                    $this->_cancelTimeout ($nonces[$nonce]);
+                    $this->emit ($nonce, true);
+                }
+                $symbolData['sub-nonces'] = array ();
+                $this->_contextSetSymbolData ($contextId, $event, $symbol, $symbolData);
+            }
+        }
+    }
+
+    public function _websocket_subscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob' && $event !== 'trade') {
+            throw new NotSupported ('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        // save $nonce for subscription response
+        $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+        if (!(is_array ($symbolData) && array_key_exists ('sub-nonces', $symbolData))) {
+            $symbolData['sub-nonces'] = array ();
+        }
+        $symbolData['limit'] = $this->safe_integer($params, 'limit', null);
+        $nonceStr = (string) $nonce;
+        $handle = $this->_setTimeout ($contextId, $this->timeout, $this->_websocketMethodMap ('_websocketTimeoutRemoveNonce'), [$contextId, $nonceStr, $event, $symbol, 'sub-nonce']);
+        $channel = null;
+        $symbolData['sub-nonces'][$nonceStr] = $handle;
+        $this->_contextSetSymbolData ($contextId, $event, $symbol, $symbolData);
+        // send request
+        if ($event === 'ob') {
+            $channel = 'order_book';
+        } else if ($event === 'trade') {
+            $channel = 'live_trades';
+        }
+        if ($symbol !== 'BTC/USD') {
+            $id = $this->market_id($symbol);
+            $channel = $channel . '_' . $id;
+        }
+        $this->websocketSendJson (array (
+            'event' => 'subscribe',
+            'channel' => $channel,
+        ), $contextId);
+    }
+
+    public function _websocket_unsubscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        $channel = null;
+        if ($event !== 'ob' && $event !== 'trade') {
+            throw new NotSupported ('unsubscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        if ($event === 'ob') {
+            $channel = 'order_book';
+        } else if ($event === 'trade') {
+            $channel = 'live_trades';
+        }
+        if ($symbol !== 'BTC/USD') {
+            $id = $this->market_id($symbol);
+            $channel = $channel . '_' . $id;
+        }
+        $this->websocketSendJson (array (
+            'event' => 'unsubscribe',
+            'channel' => $channel,
+        ));
+        $nonceStr = (string) $nonce;
+        $this->emit ($nonceStr, true);
+    }
+
+    public function _websocket_timeout_remove_nonce ($contextId, $timerNonce, $event, $symbol, $key) {
+        $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+        if (is_array ($symbolData) && array_key_exists ($key, $symbolData)) {
+            $nonces = $symbolData[$key];
+            if (is_array ($nonces) && array_key_exists ($timerNonce, $nonces)) {
+                $this->omit ($symbolData[$key], $timerNonce);
+                $this->_contextSetSymbolData ($contextId, $event, $symbol, $symbolData);
+            }
+        }
+    }
+
+    public function _get_current_websocket_orderbook ($contextId, $symbol, $limit) {
+        $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if ((is_array ($data) && array_key_exists ('ob', $data)) && ($data['ob'] !== null)) {
+            return $this->_cloneOrderBook ($data['ob'], $limit);
+        }
+        return null;
     }
 }

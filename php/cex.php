@@ -81,6 +81,38 @@ class cex extends Exchange {
                     ),
                 ),
             ),
+            'wsconf' => array (
+                'conx-tpls' => array (
+                    'default' => array (
+                        'type' => 'ws',
+                        'baseurl' => 'wss://ws.cex.io/ws/',
+                        'wait4readyEvent' => 'auth',
+                    ),
+                ),
+                'methodmap' => array (
+                    'connected' => '_websocketHandleConnected',
+                    'auth' => '_websocketHandleAuth',
+                    'ping' => '_websocketHandlePing',
+                    'order-book-subscribe' => '_websocketHandleObSubscribe',
+                    'order-book-unsubscribe' => '_websocketHandleObUnsubscribe',
+                    'md_update' => '_websocketHandleObUpdate',
+                ),
+                'events' => array (
+                    'ob' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                    'tickers' => array (
+                    ),
+                    'ohlvc' => array (
+                    ),
+                    'trades' => array (
+                    ),
+                ),
+            ),
             'fees' => array (
                 'trading' => array (
                     'maker' => 0.16 / 100,
@@ -562,5 +594,136 @@ class cex extends Exchange {
             'tag' => null,
             'info' => $response,
         );
+    }
+
+    public function _websocket_on_message ($contextId, $data) {
+        $msg = json_decode ($data, $as_associative_array = true);
+        $e = $this->safe_string($msg, 'e');
+        $oid = $this->safe_string($msg, 'oid');
+        $resData = $this->safe_value($msg, 'data', array ());
+        if (is_array ($this->wsconf['methodmap']) && array_key_exists ($e, $this->wsconf['methodmap'])) {
+            $method = $this->wsconf['methodmap'][$e];
+            $this->$method ($contextId, $msg, $oid, $resData);
+        }
+    }
+
+    public function _websocket_handle_connected ($contextId, $msg, $oid, $data) {
+        $this->websocketSendJson ($this->_websocket_auth_payload ());
+    }
+
+    public function _websocket_handle_auth ($contextId, $msg, $oid, $resData) {
+        $this->_contextSetConnectionAuth ($contextId, true);
+        if ($msg['ok'] === 'ok') {
+            $this->emit ('auth', true);
+        } else {
+            $this->emit ('auth', false, new AuthenticationError ($this->safe_string($resData, 'error', 'auth error')));
+        }
+    }
+
+    public function _websocket_handle_ping ($contextId, $msg, $oid, $data) {
+        $this->websocketSendJson (array ( 'e' => 'pong' ));
+    }
+
+    public function _websocket_handle_ob_subscribe ($contextId, $msg, $oid, $resData) {
+        if ($msg['ok'] === 'ok') {
+            $symbol = str_replace (':', '/', $resData['pair']);
+            $timestamp = $resData['timestamp'] * 1000;
+            $ob = $this->parse_order_book($resData, $timestamp);
+            $ob['nonce'] = $resData['id'];
+            $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+            $data['ob'] = $ob;
+            $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $data);
+            $this->emit ($oid, true);
+            $this->emit ('ob', $symbol, $this->_cloneOrderBook ($data['ob'], $data['limit']));
+        } else {
+            $error = new ExchangeError ($this->safe_string($resData, 'error', 'orderbook error'));
+            $this->emit ($oid, false, $error);
+        }
+    }
+
+    public function _websocket_handle_ob_unsubscribe ($contextId, $msg, $oid, $resData) {
+        if ($msg['ok'] === 'ok') {
+            $data = $this->safe_value($msg, 'data');
+            if ($data !== null) {
+                $pair = $this->safe_value($data, 'pair');
+                if ($pair !== null) {
+                    // $symbol = str_replace (':', '/', $resData['pair']);
+                    $this->emit ($oid, true);
+                }
+            }
+        } else {
+            $error = new ExchangeError ($this->safe_string($resData, 'error', 'orderbook error'));
+            $this->emit ($oid, false, $error);
+        }
+    }
+
+    public function _websocket_handle_ob_update ($contextId, $msg, $oid, $resData) {
+        $symbol = str_replace (':', '/', $resData['pair']);
+        $timestamp = $resData['time'];
+        $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if ($data['ob']['nonce'] !== ($resData['id'] - 1)) {
+            $this->websocketClose ();
+            $this->emit ('err', new NetworkError ('invalid orderbook sequence in ' . $this->id . ' ' . $data['ob']['nonce'] . ' !== ' . $resData['id'] . ' -1'));
+        } else {
+            $ob = $this->mergeOrderBookDelta ($data['ob'], $resData, $timestamp);
+            $ob['nonce'] = $resData['id'];
+            $data['ob'] = $ob;
+            $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $data);
+            $this->emit ('ob', $symbol, $this->_cloneOrderBook ($data['ob'], $data['limit']));
+        }
+    }
+
+    public function _websocket_auth_payload () {
+        $timestamp = (int) floor ($this->milliseconds () / 1000);
+        $timestamp = (string) $timestamp;
+        return array (
+            'e' => 'auth',
+            'auth' => array (
+                'key' => $this->apiKey,
+                'signature' => $this->hmac ($this->encode ($timestamp . $this->apiKey), $this->encode ($this->secret)),
+                'timestamp' => $timestamp,
+            ),
+        );
+    }
+
+    public function _websocket_subscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob') {
+            throw new NotSupported ('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        [$currencyBase, $currencyQuote] = explode ('/', $symbol);
+        $data = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+        $data['limit'] = $this->safe_value($params, 'limit');
+        $this->_contextSetSymbolData ($contextId, $event, $symbol, $data);
+        $this->websocketSendJson (array (
+            'e' => 'order-book-subscribe',
+            'data' => array (
+                'pair' => [$currencyBase, $currencyQuote],
+                'subscribe' => true,
+                'depth' => 0,
+            ),
+            'oid' => $nonce,
+        ));
+    }
+
+    public function _websocket_unsubscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob') {
+            throw new NotSupported ('unsubscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        [$currencyBase, $currencyQuote] = explode ('/', $symbol);
+        $this->websocketSendJson (array (
+            'e' => 'order-book-unsubscribe',
+            'data' => array (
+                'pair' => [$currencyBase, $currencyQuote],
+            ),
+            'oid' => $nonce,
+        ));
+    }
+
+    public function _get_current_websocket_orderbook ($contextId, $symbol, $limit) {
+        $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if ((is_array ($data) && array_key_exists ('ob', $data)) && ($data['ob'] !== null)) {
+            return $this->_cloneOrderBook ($data['ob'], $limit);
+        }
+        return null;
     }
 }

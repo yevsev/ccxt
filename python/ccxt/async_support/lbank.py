@@ -5,9 +5,11 @@
 
 from ccxt.async_support.base.exchange import Exchange
 import math
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import InvalidOrder
+from ccxt.base.errors import NotSupported
 from ccxt.base.errors import DDoSProtection
 
 
@@ -72,6 +74,27 @@ class lbank (Exchange):
                         'withdraws',
                         'withdrawConfigs',
                     ],
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://api.lbank.info/ws',
+                        'wait-after-connect': 1000,
+                    },
+                },
+                'methodmap': {
+                    '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
             'fees': {
@@ -527,3 +550,106 @@ class lbank (Exchange):
             }, errorCode, ExchangeError)
             raise ErrorClass(message)
         return response
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        success = self.safe_string(msg, 'success')
+        channel = self.safe_string(msg, 'channel')
+        if success is not None:
+            # subscription
+            parts = channel.split('_')
+            partsLen = len(parts)
+            if partsLen > 5:
+                if parts[5] == 'depth':
+                    # orderbook
+                    symbol = self.find_symbol(parts[3] + '_' + parts[4])
+                    # try to match with subscription
+                    found = False
+                    data = self._contextGetSymbolData(contextId, 'ob', symbol)
+                    if 'sub-nonces' in data:
+                        nonces = data['sub-nonces']
+                        keys = list(nonces.keys())
+                        for i in range(0, len(keys)):
+                            found = True
+                            nonce = keys[i]
+                            self._cancelTimeout(nonces[nonce])
+                            self.emit(nonce, success == 'true')
+                        data['sub-nonces'] = {}
+                    # if not found try unsubscription
+                    if not found:
+                        if 'unsub-nonces' in data:
+                            nonces = data['unsub-nonces']
+                            keys = list(nonces.keys())
+                            for i in range(0, len(keys)):
+                                found = True
+                                nonce = keys[i]
+                                self._cancelTimeout(nonces[nonce])
+                                self.emit(nonce, success == 'true')
+                            data['unsub-nonces'] = {}
+                    self._contextSetSymbolData(contextId, 'ob', symbol, data)
+        else:
+            parts = channel.split('_')
+            partsLen = len(parts)
+            if partsLen > 5:
+                if parts[5] == 'depth':
+                    symbol = self.find_symbol(parts[3] + '_' + parts[4])
+                    self._websocket_handle_ob(contextId, msg, symbol)
+            else:
+                self.emit('err', ExchangeError(self.id + ' invalid channel ' + channel))
+
+    def _websocket_handle_ob(self, contextId, msg, symbol):
+        ob = self.parse_order_book(msg)
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        data['ob'] = ob
+        self._contextSetSymbolData(contextId, 'ob', symbol, data)
+        self.emit('ob', symbol, self._cloneOrderBook(ob, data['limit']))
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        id = self.market_id(symbol)
+        payload = {
+            'event': 'addChannel',
+            'channel': 'lh_sub_spot_' + id + '_depth_60',
+        }
+        data = self._contextGetSymbolData(contextId, event, symbol)
+        data['limit'] = self.safe_integer(params, 'limit', None)
+        if not('sub-nonces' in list(data.keys())):
+            data['sub-nonces'] = {}
+        nonceStr = str(nonce)
+        handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonces'])
+        data['sub-nonces'][nonceStr] = handle
+        self._contextSetSymbolData(contextId, event, symbol, data)
+        self.websocketSendJson(payload)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        id = self.market_id(symbol)
+        payload = {
+            'event': 'removeChannel',
+            'channel': 'lh_sub_spot_' + id + '_depth_60',
+            'id': nonce,
+        }
+        data = self._contextGetSymbolData(contextId, event, symbol)
+        if not('unsub-nonces' in list(data.keys())):
+            data['unsub-nonces'] = {}
+        nonceStr = str(nonce)
+        handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces'])
+        data['unsub-nonces'][nonceStr] = handle
+        self._contextSetSymbolData(contextId, event, symbol, data)
+        self.websocketSendJson(payload)
+
+    def _websocket_timeout_remove_nonce(self, contextId, timerNonce, event, symbol, key):
+        data = self._contextGetSymbolData(contextId, event, symbol)
+        if key in data:
+            nonces = data[key]
+            if timerNonce in nonces:
+                self.omit(data[key], timerNonce)
+                self._contextSetSymbolData(contextId, event, symbol, data)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

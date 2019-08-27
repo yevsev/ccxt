@@ -102,6 +102,26 @@ class liquid extends Exchange {
             'options' => array (
                 'cancelOrderException' => true,
             ),
+            'wsconf' => array (
+                'conx-tpls' => array (
+                    'default' => array (
+                        'type' => 'pusher',
+                        'baseurl' => 'wss://ws.pusherapp.com/app/2ff981bb060680b5ce97',
+                    ),
+                ),
+                'methodmap' => array (
+                    '_websocketTimeoutRemoveNonce' => '_websocketTimeoutRemoveNonce',
+                ),
+                'events' => array (
+                    'ob' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                ),
+            ),
         ));
     }
 
@@ -694,5 +714,160 @@ class liquid extends Exchange {
         } else {
             throw new ExchangeError ($feedback);
         }
+    }
+
+    public function _websocket_on_message ($contextId, $data) {
+        $msg = json_decode ($data, $as_associative_array = true);
+        // var_dump ($data);
+        $evt = $this->safe_string($msg, 'event');
+        if ($evt === 'subscription_succeeded') {
+            $this->_websocket_handle_subscription ($contextId, $msg);
+        } else if ($evt === 'updated') {
+            $chan = $this->safe_string($msg, 'channel');
+            if (mb_strpos ($chan, 'price_ladders_cash_') !== false) {
+                $this->_websocket_handle_orderbook ($contextId, $msg);
+            }
+        }
+    }
+
+    public function _websocket_handle_orderbook ($contextId, $msg) {
+        $chan = $this->safe_string($msg, 'channel');
+        $parts = explode ('_', $chan);
+        $symbol = $parts[3];
+        $symbolMap = $this->_contextGet ($contextId, 'symbolmap');
+        if (is_array ($symbolMap) && array_key_exists ($symbol, $symbolMap)) {
+            $symbol = $symbolMap[$symbol];
+        }
+        $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if (!(is_array ($symbolData) && array_key_exists ('ob', $symbolData))) {
+            $symbolData['ob'] = array (
+                'nonce' => null,
+                'timestamp' => null,
+                'datetime' => null,
+                'bids' => array (),
+                'asks' => array (),
+            );
+        }
+        $data = $this->safe_value($msg, 'data');
+        if ($parts[4] === 'buy') {
+            $symbolData['ob']['bids'] = $data;
+        } else {
+            $symbolData['ob']['asks'] = $data;
+        }
+        $this->emit ('ob', $symbol, $this->_cloneOrderBook ($symbolData['ob'], $symbolData['limit']));
+        $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+    }
+
+    public function _websocket_handle_subscription ($contextId, $msg) {
+        $chan = $this->safe_string($msg, 'channel');
+        if (mb_strpos ($chan, 'price_ladders_cash_') !== false) {
+            $parts = explode ('_', $chan);
+            $symbol = $parts[3];
+            $symbolMap = $this->_contextGet ($contextId, 'symbolmap');
+            if (is_array ($symbolMap) && array_key_exists ($symbol, $symbolMap)) {
+                $symbol = $symbolMap[$symbol];
+            }
+            $buyOrSell = ($parts[4] === 'buy') ? 'buy_sub' : 'sell_sub';
+            $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+            if (is_array ($symbolData) && array_key_exists ('sub-nonces', $symbolData)) {
+                $nonces = $symbolData['sub-nonces'];
+                $keys = is_array ($nonces) ? array_keys ($nonces) : array ();
+                for ($i = 0; $i < count ($keys); $i++) {
+                    $nonce = $keys[$i];
+                    $nonces[$nonce][$buyOrSell] = true;
+                    if (($nonces[$nonce]['buy_sub']) && ($nonces[$nonce]['sell_sub'])) {
+                        $this->_cancelTimeout ($nonces[$nonce]['handle']);
+                        $this->emit ($nonce, true);
+                        $this->omit ($symbolData['sub-nonces'], $nonce);
+                    }
+                }
+                $symbolData['sub-nonces'] = $nonces;
+                $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+            }
+        }
+    }
+
+    public function _websocket_on_open ($contextId, $websocketOptions) {
+        $symbolMap = array ();
+        $this->_contextSet ($contextId, 'symbolmap', $symbolMap);
+    }
+
+    public function _websocket_subscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob') {
+            throw new NotSupported ('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        // save $nonce for subscription response
+        $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+        if (!(is_array ($symbolData) && array_key_exists ('sub-nonces', $symbolData))) {
+            $symbolData['sub-nonces'] = array ();
+        }
+        $symbolData['limit'] = $this->safe_integer($params, 'limit', null);
+        $nonceStr = (string) $nonce;
+        $handle = $this->_setTimeout ($contextId, $this->timeout, $this->_websocketMethodMap ('_websocketTimeoutRemoveNonce'), [$contextId, $nonceStr, $event, $symbol, 'sub-nonce']);
+        $symbolData['sub-nonces'][$nonceStr] = array (
+            'handle' => $handle,
+            'buy_sub' => false,
+            'sell_sub' => false,
+        );
+        $this->_contextSetSymbolData ($contextId, $event, $symbol, $symbolData);
+        // send request
+        $id = $this->_websocket_market_id ($symbol);
+        $symbolMap = $this->_contextGet ($contextId, 'symbolmap');
+        $symbolMap[$id] = $symbol;
+        $this->_contextSet ($contextId, 'symbolmap', $symbolMap);
+        $this->websocketSendJson (array (
+            'event' => 'subscribe',
+            'channel' => 'price_ladders_cash_' . $id . '_buy',
+        ), $contextId);
+        $this->websocketSendJson (array (
+            'event' => 'subscribe',
+            'channel' => 'price_ladders_cash_' . $id . '_sell',
+        ), $contextId);
+    }
+
+    public function _websocket_unsubscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob') {
+            throw new NotSupported ('unsubscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        $id = $this->_websocket_market_id ($symbol);
+        $this->websocketSendJson (array (
+            'event' => 'unsubscribe',
+            'channel' => 'price_ladders_cash_' . $id . '_buy',
+        ));
+        $this->websocketSendJson (array (
+            'event' => 'unsubscribe',
+            'channel' => 'price_ladders_cash_' . $id . '_sell',
+        ));
+        $nonceStr = (string) $nonce;
+        $this->emit ($nonceStr, true);
+    }
+
+    public function _websocket_timeout_remove_nonce ($contextId, $timerNonce, $event, $symbol, $key) {
+        $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+        if (is_array ($symbolData) && array_key_exists ($key, $symbolData)) {
+            $nonces = $symbolData[$key];
+            if (is_array ($nonces) && array_key_exists ($timerNonce, $nonces)) {
+                $this->omit ($symbolData[$key], $timerNonce);
+                $this->_contextSetSymbolData ($contextId, $event, $symbol, $symbolData);
+            }
+        }
+    }
+
+    public function _websocket_market_id ($symbol) {
+        $market = $this->find_market($symbol);
+        if ($market !== null) {
+            $baseId = strtolower ($market['baseId']);
+            $quoteId = strtolower ($market['quoteId']);
+            return $baseId . $quoteId;
+        }
+        return $symbol;
+    }
+
+    public function _get_current_websocket_orderbook ($contextId, $symbol, $limit) {
+        $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if ((is_array ($data) && array_key_exists ('ob', $data)) && ($data['ob'] !== null)) {
+            return $this->_cloneOrderBook ($data['ob'], $limit);
+        }
+        return null;
     }
 }

@@ -5,6 +5,7 @@
 
 from ccxt.async_support.base.exchange import Exchange
 import math
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import PermissionDenied
@@ -12,6 +13,7 @@ from ccxt.base.errors import BadRequest
 from ccxt.base.errors import InsufficientFunds
 from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import OrderNotFound
+from ccxt.base.errors import NotSupported
 
 
 class upbit (Exchange):
@@ -144,6 +146,39 @@ class upbit (Exchange):
                 'symbolSeparator': '-',
                 'tradingFeesByQuoteCurrency': {
                     'KRW': 0.0005,
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://crix-websocket-sg.upbit.com/sockjs/websocket',
+                        'baseurl2': 'wss://crix-ws.upbit.com/websocket',
+                        'baseurl3': 'wss://api.upbit.com/websocket/v1',
+                    },
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'ticker': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
             'commonCurrencies': {
@@ -1427,3 +1462,179 @@ class upbit (Exchange):
             if broadKey is not None:
                 raise broad[broadKey](feedback)
             raise ExchangeError(feedback)  # unknown message
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        # console.log(msg)
+        type = self.safe_string(msg, 'type')
+        code = self.safe_string(msg, 'code')
+        # streamType = self.safe_string(msg, 'streamType')
+        id = code.replace('CRIX.UPBIT.', '')
+        type = type.replace('crix', '')
+        type = type.lower()
+        symbol = self.find_symbol(id)
+        if type == 'orderbook':
+            self._websocket_handle_order_book(contextId, symbol, msg)
+        elif type == 'trade':
+            self._websocket_handle_trade(contextId, symbol, msg)
+        elif type == 'ticker':
+            self._websocket_handle_ticker(contextId, symbol, msg)
+
+    def _websocket_handle_order_book(self, contextId, symbol, msg):
+        obUnits = self.safe_value(msg, 'orderbook_units', [])
+        timestamp = self.safe_float(msg, 'timestamp')
+        ob = {
+            'bids': [],
+            'asks': [],
+            'timestamp': timestamp,
+            'datetime': self.iso8601(timestamp),
+            'nonce': None,
+        }
+        for i in range(0, len(obUnits)):
+            obUnit = obUnits[i]
+            bidPrice = self.safe_float(obUnit, 'bid_price')
+            bidSize = self.safe_float(obUnit, 'bid_size')
+            askPrice = self.safe_float(obUnit, 'ask_price')
+            askSize = self.safe_float(obUnit, 'ask_size')
+            self.updateBidAsk([bidPrice, bidSize], ob['bids'], True)
+            self.updateBidAsk([askPrice, askSize], ob['asks'], False)
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        symbolData['ob'] = ob
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+        self.emit('ob', symbol, self._cloneOrderBook(symbolData['ob'], symbolData['limit']))
+
+    def _websocket_handle_ticker(self, contextId, symbol, msg):
+        #  {"type":"ticker","code":"BTC-ETH","opening_price":0.02601664,"high_price":0.02615611,"low_price":0.02587020,"trade_price":0.02599133,"prev_closing_price":0.02602994,"acc_trade_price":142.52289604,"change":"FALL","change_price":0.00003861,"signed_change_price":-0.00003861,"change_rate":0.0014832919,"signed_change_rate":-0.0014832919,"ask_bid":"ASK","trade_volume":39.09714085,"acc_trade_volume":5470.69961159,"trade_date":"20181215","trade_time":"153346","trade_timestamp":1544888026830,"acc_ask_volume":2350.63591821,"acc_bid_volume":3120.06369338,"highest_52_week_price":0.12345678,"highest_52_week_date":"2018-02-01","lowest_52_week_price":0.02460824,"lowest_52_week_date":"2018-12-07","trade_status":null,"market_state":"ACTIVE","market_state_for_ios":null,"is_trading_suspended":false,"delisting_date":null,"market_warning":"NONE","timestamp":1544888027872,"acc_trade_price_24h":null,"acc_trade_volume_24h":null,"stream_type":"SNAPSHOT"}
+        timestamp = self.safe_integer(msg, 'trade_timestamp')
+        previous = self.safe_float(msg, 'prev_closing_price')
+        last = self.safe_float(msg, 'trade_price')
+        change = self.safe_float(msg, 'signed_change_price')
+        percentage = self.safe_float(msg, 'signed_change_rate')
+        t = {
+            'symbol': symbol,
+            'timestamp': timestamp,
+            'datetime': self.iso8601(timestamp),
+            'high': self.safe_float(msg, 'high_price'),
+            'low': self.safe_float(msg, 'low_price'),
+            'bid': None,
+            'bidVolume': None,
+            'ask': None,
+            'askVolume': None,
+            'vwap': None,
+            'open': self.safe_float(msg, 'opening_price'),
+            'close': last,
+            'last': last,
+            'previousClose': previous,
+            'change': change,
+            'percentage': percentage,
+            'average': None,
+            'baseVolume': self.safe_float(msg, 'acc_trade_volume_24h'),
+            'quoteVolume': self.safe_float(msg, 'acc_trade_price_24h'),
+            'info': msg,
+        }
+        self.emit('ticker', symbol, t)
+
+    def _websocket_handle_trade(self, contextId, symbol, msg):
+        # {"prevClosingPrice":0.02602994,"change":"RISE","changePrice":0.00005434,,"type":"crixTrade","code":"CRIX.UPBIT.BTC-ETH",,"streamType":"SNAPSHOT"}
+        id = self.safe_string(msg, 'sequential_id')
+        orderId = None
+        timestamp = self.safe_integer(msg, 'trade_timestamp')
+        side = None
+        askOrBid = self.safe_string(msg, 'ask_bid')
+        if askOrBid is not None:
+            askOrBid = askOrBid.lower()
+        if askOrBid == 'ask':
+            side = 'sell'
+        elif askOrBid == 'bid':
+            side = 'buy'
+        cost = None
+        price = self.safe_float(msg, 'trade_price')
+        amount = self.safe_float(msg, 'trade_volume')
+        if amount is not None:
+            if price is not None:
+                cost = price * amount
+        trade = {
+            'id': id,
+            'info': msg,
+            'order': orderId,
+            'timestamp': timestamp,
+            'datetime': self.iso8601(timestamp),
+            'symbol': symbol,
+            'type': 'limit',
+            'side': side,
+            'price': price,
+            'amount': amount,
+            'cost': cost,
+            'fee': None,
+        }
+        self.emit('trade', symbol, [trade])
+
+    def _websocket_generate_ticket(self, contextId, sEvent, sSymbol, subscribe):
+        ticket = [
+            {
+                'ticket': 'ram macbook',
+            },
+            {
+                'format': 'DEFAULT',
+            },
+        ]
+        eventCodes = {}
+        subscribedEvents = self._websocketContextGetSubscribedEventSymbols(contextId)
+        for i in range(0, len(subscribedEvents)):
+            subscribedEvent = subscribedEvents[i]
+            event = subscribedEvent['event']
+            symbol = subscribedEvent['symbol']
+            if subscribe or (event != sEvent) and(symbol != sSymbol):
+                # id = 'CRIX.UPBIT.' + self.market_id(symbol)
+                id = self.market_id(symbol)
+                if event in eventCodes:
+                    eventCodes[event].append(id)
+                else:
+                    eventCodes[event] = [id]
+        events = list(eventCodes.keys())
+        for j in range(0, len(events)):
+            event = events[j]
+            if event == 'ob':
+                ticket.append({
+                    'type': 'orderbook',
+                    'codes': eventCodes[event],
+                })
+            elif event == 'trade':
+                ticket.append({
+                    'type': 'trade',
+                    'codes': eventCodes[event],
+                })
+            elif event == 'ticker':
+                ticket.append({
+                    'type': 'ticker',
+                    'codes': eventCodes[event],
+                })
+        return ticket
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if (event != 'ob') and(event != 'ticker') and(event != 'trade'):
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        # save nonce for subscription response
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        payload = self._websocket_generate_ticket(contextId, event, symbol, True)
+        if event == 'ob':
+            symbolData['limit'] = self.safe_integer(params, 'limit', None)
+        self._contextSetSymbolData(contextId, event, symbol, symbolData)
+        # send request
+        self.websocketSendJson(payload)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        if (event != 'ob') and(event != 'ticker') and(event != 'trade'):
+            raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        payload = self._websocket_generate_ticket(contextId, event, symbol, False)
+        nonceStr = str(nonce)
+        self.websocketSendJson(payload)
+        self.emit(nonceStr, True)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

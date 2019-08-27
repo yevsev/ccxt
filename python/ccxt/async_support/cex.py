@@ -11,12 +11,15 @@ try:
     basestring  # Python 3
 except NameError:
     basestring = str  # Python 2
+import math
 import json
 from ccxt.base.errors import ExchangeError
+from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import ArgumentsRequired
 from ccxt.base.errors import NullResponse
 from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import NotSupported
+from ccxt.base.errors import NetworkError
 
 
 class cex (Exchange):
@@ -91,6 +94,38 @@ class cex (Exchange):
                         'open_positions/{pair}/',
                         'place_order/{pair}/',
                     ],
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://ws.cex.io/ws/',
+                        'wait4readyEvent': 'auth',
+                    },
+                },
+                'methodmap': {
+                    'connected': '_websocketHandleConnected',
+                    'auth': '_websocketHandleAuth',
+                    'ping': '_websocketHandlePing',
+                    'order-book-subscribe': '_websocketHandleObSubscribe',
+                    'order-book-unsubscribe': '_websocketHandleObUnsubscribe',
+                    'md_update': '_websocketHandleObUpdate',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'tickers': {
+                    },
+                    'ohlvc': {
+                    },
+                    'trades': {
+                    },
                 },
             },
             'fees': {
@@ -527,3 +562,113 @@ class cex (Exchange):
             'tag': None,
             'info': response,
         }
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        e = self.safe_string(msg, 'e')
+        oid = self.safe_string(msg, 'oid')
+        resData = self.safe_value(msg, 'data', {})
+        if e in self.wsconf['methodmap']:
+            method = self.wsconf['methodmap'][e]
+            getattr(self, method)(contextId, msg, oid, resData)
+
+    def _websocket_handle_connected(self, contextId, msg, oid, data):
+        self.websocketSendJson(self._websocket_auth_payload())
+
+    def _websocket_handle_auth(self, contextId, msg, oid, resData):
+        self._contextSetConnectionAuth(contextId, True)
+        if msg['ok'] == 'ok':
+            self.emit('auth', True)
+        else:
+            self.emit('auth', False, AuthenticationError(self.safe_string(resData, 'error', 'auth error')))
+
+    def _websocket_handle_ping(self, contextId, msg, oid, data):
+        self.websocketSendJson({'e': 'pong'})
+
+    def _websocket_handle_ob_subscribe(self, contextId, msg, oid, resData):
+        if msg['ok'] == 'ok':
+            symbol = resData['pair'].replace(':', '/')
+            timestamp = resData['timestamp'] * 1000
+            ob = self.parse_order_book(resData, timestamp)
+            ob['nonce'] = resData['id']
+            data = self._contextGetSymbolData(contextId, 'ob', symbol)
+            data['ob'] = ob
+            self._contextSetSymbolData(contextId, 'ob', symbol, data)
+            self.emit(oid, True)
+            self.emit('ob', symbol, self._cloneOrderBook(data['ob'], data['limit']))
+        else:
+            error = ExchangeError(self.safe_string(resData, 'error', 'orderbook error'))
+            self.emit(oid, False, error)
+
+    def _websocket_handle_ob_unsubscribe(self, contextId, msg, oid, resData):
+        if msg['ok'] == 'ok':
+            data = self.safe_value(msg, 'data')
+            if data is not None:
+                pair = self.safe_value(data, 'pair')
+                if pair is not None:
+                    # symbol = resData['pair'].replace(':', '/')
+                    self.emit(oid, True)
+        else:
+            error = ExchangeError(self.safe_string(resData, 'error', 'orderbook error'))
+            self.emit(oid, False, error)
+
+    def _websocket_handle_ob_update(self, contextId, msg, oid, resData):
+        symbol = resData['pair'].replace(':', '/')
+        timestamp = resData['time']
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if data['ob']['nonce'] != (resData['id'] - 1):
+            self.websocketClose()
+            self.emit('err', NetworkError('invalid orderbook sequence in ' + self.id + ' ' + data['ob']['nonce'] + ' != ' + resData['id'] + ' -1'))
+        else:
+            ob = self.mergeOrderBookDelta(data['ob'], resData, timestamp)
+            ob['nonce'] = resData['id']
+            data['ob'] = ob
+            self._contextSetSymbolData(contextId, 'ob', symbol, data)
+            self.emit('ob', symbol, self._cloneOrderBook(data['ob'], data['limit']))
+
+    def _websocket_auth_payload(self):
+        timestamp = int(math.floor(self.milliseconds()) / 1000)
+        timestamp = str(timestamp)
+        return {
+            'e': 'auth',
+            'auth': {
+                'key': self.apiKey,
+                'signature': self.hmac(self.encode(timestamp + self.apiKey), self.encode(self.secret)),
+                'timestamp': timestamp,
+            },
+        }
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        [currencyBase, currencyQuote] = symbol.split('/')
+        data = self._contextGetSymbolData(contextId, event, symbol)
+        data['limit'] = self.safe_value(params, 'limit')
+        self._contextSetSymbolData(contextId, event, symbol, data)
+        self.websocketSendJson({
+            'e': 'order-book-subscribe',
+            'data': {
+                'pair': [currencyBase, currencyQuote],
+                'subscribe': True,
+                'depth': 0,
+            },
+            'oid': nonce,
+        })
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        [currencyBase, currencyQuote] = symbol.split('/')
+        self.websocketSendJson({
+            'e': 'order-book-unsubscribe',
+            'data': {
+                'pair': [currencyBase, currencyQuote],
+            },
+            'oid': nonce,
+        })
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

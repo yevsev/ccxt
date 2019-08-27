@@ -21,6 +21,26 @@ class coinbaseprime extends gdax {
                 'doc' => 'https://docs.prime.coinbase.com',
                 'fees' => 'https://support.prime.coinbase.com/customer/en/portal/articles/2945629-fees?b_id=17475',
             ),
+            'wsconf' => array (
+                'conx-tpls' => array (
+                    'default' => array (
+                        'type' => 'ws',
+                        'baseurl' => 'wss://ws-feed.prime.coinbase.com',
+                    ),
+                ),
+                'methodmap' => array (
+                    '_websocketTimeoutRemoveNonce' => '_websocketTimeoutRemoveNonce',
+                ),
+                'events' => array (
+                    'ob' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                ),
+            ),
         ));
     }
 }

@@ -4,6 +4,7 @@
 # https://github.com/ccxt/ccxt/blob/master/CONTRIBUTING.md#how-to-contribute-code
 
 from ccxt.async_support.base.exchange import Exchange
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import PermissionDenied
@@ -11,6 +12,7 @@ from ccxt.base.errors import BadRequest
 from ccxt.base.errors import InsufficientFunds
 from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import OrderNotFound
+from ccxt.base.errors import NotSupported
 from ccxt.base.errors import DDoSProtection
 from ccxt.base.errors import ExchangeNotAvailable
 
@@ -138,6 +140,34 @@ class bitmex (Exchange):
                         'order',
                         'order/all',
                     ],
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://www.bitmex.com/realtime',
+                    },
+                },
+                'methodmap': {
+                    '_websocketTimeoutSendPing': '_websocketTimeoutSendPing',
+                    '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
             'exceptions': {
@@ -952,3 +982,255 @@ class bitmex (Exchange):
                     auth += body
             headers['api-signature'] = self.hmac(self.encode(auth), self.encode(self.secret))
         return {'url': url, 'method': method, 'body': body, 'headers': headers}
+
+    def _websocket_on_open(self, contextId, websocketOptions):
+        lastTimer = self._contextGet(contextId, 'timer')
+        if lastTimer is not None:
+            self._cancelTimeout(lastTimer)
+        lastTimer = self._setTimeout(contextId, 5000, self._websocketMethodMap('_websocketTimeoutSendPing'), [])
+        self._contextSet(contextId, 'timer', lastTimer)
+        dbids = {}
+        self._contextSet(contextId, 'dbids', dbids)
+        # send auth
+        # nonce = self.nonce()
+        # signature = self.hmac(self.encode('GET/realtime' + str(nonce)), self.encode(self.secret))
+        # payload = {
+        #     'op': 'authKeyExpires',
+        #     'args': [self.apiKey, nonce, signature]
+        #  }
+        # self.asyncSendJson(payload)
+
+    def _websocket_on_pong(self, contextId, data):
+        print("PONG " + data)
+
+    def _websocket_on_message(self, contextId, data):
+        # send ping after 5 seconds if not message received
+        if data == 'pong':
+            return
+        msg = json.loads(data)
+        table = self.safe_string(msg, 'table')
+        subscribe = self.safe_string(msg, 'subscribe')
+        unsubscribe = self.safe_string(msg, 'unsubscribe')
+        status = self.safe_integer(msg, 'status')
+        if subscribe is not None:
+            self._websocket_handle_subscription(contextId, msg)
+        elif unsubscribe is not None:
+            self._websocket_handle_unsubscription(contextId, msg)
+        elif table is not None:
+            if table == 'orderBookL2':
+                self._websocket_handle_ob(contextId, msg)
+            elif table == 'trade':
+                self._websocket_handle_trade(contextId, msg)
+        elif status is not None:
+            self._websocket_handle_error(contextId, msg)
+
+    def _websocket_timeout_send_ping(self):
+        self.websocketSendPing(1)
+
+    def _websocket_handle_error(self, contextId, msg):
+        status = self.safe_integer(msg, 'status')
+        error = self.safe_string(msg, 'error')
+        self.emit('err', ExchangeError(self.id + ' status ' + status + ':' + error), contextId)
+
+    def _websocket_handle_subscription(self, contextId, msg):
+        success = self.safe_value(msg, 'success')
+        subscribe = self.safe_string(msg, 'subscribe')
+        parts = subscribe.split(':')
+        partsLen = len(parts)
+        event = None
+        if partsLen == 2:
+            if parts[0] == 'orderBookL2':
+                event = 'ob'
+            elif parts[0] == 'trade':
+                event = 'trade'
+            else:
+                event = None
+            if event is not None:
+                symbol = self.find_symbol(parts[1])
+                symbolData = self._contextGetSymbolData(contextId, event, symbol)
+                if 'sub-nonces' in symbolData:
+                    nonces = symbolData['sub-nonces']
+                    keys = list(nonces.keys())
+                    for i in range(0, len(keys)):
+                        nonce = keys[i]
+                        self._cancelTimeout(nonces[nonce])
+                        self.emit(nonce, success)
+                    symbolData['sub-nonces'] = {}
+                    self._contextSetSymbolData(contextId, event, symbol, symbolData)
+
+    def _websocket_handle_unsubscription(self, contextId, msg):
+        success = self.safe_value(msg, 'success')
+        unsubscribe = self.safe_string(msg, 'unsubscribe')
+        parts = unsubscribe.split(':')
+        partsLen = len(parts)
+        event = None
+        if partsLen == 2:
+            if parts[0] == 'orderBookL2':
+                event = 'ob'
+            elif parts[0] == 'trade':
+                event = 'trade'
+            else:
+                event = None
+            if event is not None:
+                symbol = self.find_symbol(parts[1])
+                if success and event == 'ob':
+                    dbids = self._contextGet(contextId, 'dbids')
+                    if symbol in dbids:
+                        self.omit(dbids, symbol)
+                        self._contextSet(contextId, 'dbids', dbids)
+                symbolData = self._contextGetSymbolData(contextId, event, symbol)
+                if 'unsub-nonces' in symbolData:
+                    nonces = symbolData['unsub-nonces']
+                    keys = list(nonces.keys())
+                    for i in range(0, len(keys)):
+                        nonce = keys[i]
+                        self._cancelTimeout(nonces[nonce])
+                        self.emit(nonce, success)
+                    symbolData['unsub-nonces'] = {}
+                    self._contextSetSymbolData(contextId, event, symbol, symbolData)
+
+    def _websocket_handle_trade(self, contextId, msg):
+        data = self.safe_value(msg, 'data')
+        if data is None or len(data) == 0:
+            return
+        symbol = self.safe_string(data[0], 'symbol')
+        trades = self.parse_trades(data)
+        symbol = self.find_symbol(symbol)
+        for t in range(0, len(trades)):
+            self.emit('trade', symbol, trades[t])
+
+    def _websocket_handle_ob(self, contextId, msg):
+        action = self.safe_string(msg, 'action')
+        data = self.safe_value(msg, 'data')
+        symbol = self.safe_string(data[0], 'symbol')
+        dbids = self._contextGet(contextId, 'dbids')
+        symbol = self.find_symbol(symbol)
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if action == 'partial':
+            ob = {
+                'bids': [],
+                'asks': [],
+                'timestamp': None,
+                'datetime': None,
+                'nonce': None,
+            }
+            obIds = {}
+            for o in range(0, len(data)):
+                order = data[o]
+                side = 'asks' if (order['side'] == 'Sell') else 'bids'
+                amount = order['size']
+                price = order['price']
+                priceId = order['id']
+                ob[side].append([price, amount])
+                obIds[priceId] = price
+            ob['bids'] = self.sort_by(ob['bids'], 0, True)
+            ob['asks'] = self.sort_by(ob['asks'], 0)
+            symbolData['ob'] = ob
+            dbids[symbol] = obIds
+            self.emit('ob', symbol, self._cloneOrderBook(ob, symbolData['limit']))
+        elif action == 'update':
+            if symbol in dbids:
+                obIds = dbids[symbol]
+                curob = symbolData['ob']
+                for o in range(0, len(data)):
+                    order = data[o]
+                    amount = order['size']
+                    side = 'asks' if (order['side'] == 'Sell') else 'bids'
+                    priceId = order['id']
+                    price = obIds[priceId]
+                    self.updateBidAsk([price, amount], curob[side], order['side'] == 'Buy')
+                symbolData['ob'] = curob
+                self.emit('ob', symbol, self._cloneOrderBook(curob, symbolData['limit']))
+        elif action == 'insert':
+            if symbol in dbids:
+                curob = symbolData['ob']
+                for o in range(0, len(data)):
+                    order = data[o]
+                    amount = order['size']
+                    side = 'asks' if (order['side'] == 'Sell') else 'bids'
+                    priceId = order['id']
+                    price = order['price']
+                    self.updateBidAsk([price, amount], curob[side], order['side'] == 'Buy')
+                    dbids[symbol][priceId] = price
+                symbolData['ob'] = curob
+                self.emit('ob', symbol, self._cloneOrderBook(curob, symbolData['limit']))
+        elif action == 'delete':
+            if symbol in dbids:
+                obIds = dbids[symbol]
+                curob = symbolData['ob']
+                for o in range(0, len(data)):
+                    order = data[o]
+                    side = 'asks' if (order['side'] == 'Sell') else 'bids'
+                    priceId = order['id']
+                    price = obIds[priceId]
+                    self.updateBidAsk([price, 0], curob[side], order['side'] == 'Buy')
+                    self.omit(dbids[symbol], priceId)
+                symbolData['ob'] = curob
+                self.emit('ob', symbol, self._cloneOrderBook(curob, symbolData['limit']))
+        else:
+            self.emit('err', ExchangeError(self.id + ' invalid orderbook message'))
+        self._contextSet(contextId, 'dbids', dbids)
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob' and event != 'trade':
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        id = self.market_id(symbol).upper()
+        payload = None
+        if event == 'ob':
+            payload = {
+                'op': 'subscribe',
+                'args': ['orderBookL2:' + id],
+            }
+        elif event == 'trade':
+            payload = {
+                'op': 'subscribe',
+                'args': ['trade:' + id],
+            }
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if not('sub-nonces' in list(symbolData.keys())):
+            symbolData['sub-nonces'] = {}
+        symbolData['limit'] = self.safe_integer(params, 'limit', None)
+        nonceStr = str(nonce)
+        handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce'])
+        symbolData['sub-nonces'][nonceStr] = handle
+        self._contextSetSymbolData(contextId, event, symbol, symbolData)
+        self.websocketSendJson(payload)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob' and event != 'trade':
+            raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        id = self.market_id(symbol).upper()
+        payload = None
+        if event == 'ob':
+            payload = {
+                'op': 'unsubscribe',
+                'args': ['orderBookL2:' + id],
+            }
+        elif event == 'trade':
+            payload = {
+                'op': 'unsubscribe',
+                'args': ['trade:' + id],
+            }
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if not('unsub-nonces' in list(symbolData.keys())):
+            symbolData['unsub-nonces'] = {}
+        nonceStr = str(nonce)
+        handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces'])
+        symbolData['unsub-nonces'][nonceStr] = handle
+        self._contextSetSymbolData(contextId, event, symbol, symbolData)
+        self.websocketSendJson(payload)
+
+    def _websocket_timeout_remove_nonce(self, contextId, timerNonce, event, symbol, key):
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if key in symbolData:
+            nonces = symbolData[key]
+            if timerNonce in nonces:
+                self.omit(symbolData[key], timerNonce)
+                self._contextSetSymbolData(contextId, event, symbol, symbolData)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

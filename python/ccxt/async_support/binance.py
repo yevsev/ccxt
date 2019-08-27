@@ -13,6 +13,7 @@ from ccxt.base.errors import InsufficientFunds
 from ccxt.base.errors import InvalidAddress
 from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import OrderNotFound
+from ccxt.base.errors import NotSupported
 from ccxt.base.errors import DDoSProtection
 from ccxt.base.errors import ExchangeNotAvailable
 from ccxt.base.errors import InvalidNonce
@@ -145,6 +146,61 @@ class binance (Exchange):
                     'delete': [
                         'order',
                     ],
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws-s',
+                        'baseurl': 'wss://stream.binance.com:9443/stream?streams=',
+                    },
+                },
+                'methodmap': {
+                    'fetchOrderBook': 'fetchOrderBook',
+                    '_websocketHandleObRestSnapshot': '_websocketHandleObRestSnapshot',
+                    '_websocketSendHeartbeat': '_websocketSendHeartbeat',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                            'stream': '{symbol}@depth',
+                        },
+                    },
+                    'aggtrade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                            'stream': '{symbol}@aggTrade',
+                        },
+                    },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                            'stream': '{symbol}@trade',
+                        },
+                    },
+                    'ohlcv': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                            'stream': '{symbol}@kline_{interval}',
+                        },
+                    },
+                    'ticker': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                            'stream': '{symbol}@ticker',
+                        },
+                    },
                 },
             },
             'fees': {
@@ -1212,3 +1268,215 @@ class binance (Exchange):
         if (api == 'private') or (api == 'wapi'):
             self.options['hasAlreadyAuthenticatedSuccessfully'] = True
         return response
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        stream = self.safe_string(msg, 'stream')
+        resData = self.safe_value(msg, 'data', {})
+        parts = stream.split('@')
+        partsLen = len(parts)
+        if partsLen == 2:
+            msgType = parts[1]
+            if msgType == 'depth':
+                self._websocket_handle_ob(contextId, resData)
+            elif msgType == 'trade':
+                self._websocket_handle_trade(contextId, resData)
+            elif msgType == 'aggTrade':
+                self._websocket_handle_trade(contextId, resData)
+            elif msgType.find('kline') >= 0:
+                self._websocket_handle_kline(contextId, resData)
+            elif msgType == 'ticker':
+                self._websocket_handle_ticker(contextId, resData)
+
+    def _websocket_handle_ob(self, contextId, data):
+        symbol = self.find_symbol(self.safe_string(data, 's'))
+        # if asyncContext has no previous orderbook you have to cache all deltas
+        # and fetch orderbook from rest api
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if not('ob' in list(symbolData.keys())):
+            if not('deltas' in list(symbolData.keys())):
+                symbolData['deltas'] = []
+            deltas = symbolData['deltas']
+            partsLen = len(deltas)
+            if partsLen > 50:
+                if not('failCount' in list(symbolData.keys())):
+                    symbolData['failCount'] = 0
+                symbolData['failCount'] = symbolData['failCount'] + 1
+                if symbolData['failCount'] > 5:
+                    self.emit('err', ExchangeError(self.id + ': max deltas failCount reached for symbol ' + symbol))
+                    self.websocketClose(contextId)
+                else:
+                    # Launch again
+                    del symbolData['ob']
+                    del symbolData['deltas']
+                self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+            else:
+                symbolData['deltas'].append(data)
+                if not('snaplaunched' in list(symbolData.keys())):
+                    symbolData['snaplaunched'] = True
+                    self._executeAndCallback(contextId, self._websocketMethodMap('fetchOrderBook'), [symbol], self._websocketMethodMap('_websocketHandleObRestSnapshot'), {
+                        'symbol': symbol,
+                        'contextId': contextId,
+                    })
+                self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+        else:
+            config = self._contextGet(contextId, 'config')
+            symbolData['ob'] = self.mergeOrderBookDelta(symbolData['ob'], data, data['E'], 'b', 'a')
+            if config is not None:
+                self.emit('ob', symbol, self._cloneOrderBook(symbolData['ob'], config['ob'][symbol]['limit']))
+            else:
+                self.emit('ob', symbol, self._cloneOrderBook(symbolData['ob']))
+            self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+
+    def _websocket_handle_trade(self, contextId, data):
+        symbol = self.find_symbol(self.safe_string(data, 's'))
+        market = self.market(symbol)
+        trade = self.parse_trade(data, market)
+        self.emit('trade', symbol, trade)
+
+    def _websocket_handle_kline(self, contextId, data):
+        symbol = self.find_symbol(self.safe_string(data, 's'))
+        market = self.market(symbol)
+        kline = self.parse_ohlcv([
+            self.safe_float(data['k'], 't'),
+            self.safe_float(data['k'], 'o'),
+            self.safe_float(data['k'], 'c'),
+            self.safe_float(data['k'], 'h'),
+            self.safe_float(data['k'], 'l'),
+            self.safe_float(data['k'], 'v'),
+        ], market, self.safe_float(data, 'i'))
+        self.emit('ohlcv', symbol, kline)
+
+    def _websocket_handle_ticker(self, contextId, data):
+        symbol = self.find_symbol(self.safe_string(data, 's'))
+        market = self.market(symbol)
+        ticker = self.parse_ticker({
+            'symbol': self.safe_string(data, 's'),
+            'priceChange': self.safe_string(data, 'p'),
+            'priceChangePercent': self.safe_string(data, 'P'),
+            'weightedAvgPrice': self.safe_string(data, 'v'),
+            'prevClosePrice': self.safe_string(data, 'x'),
+            'lastPrice': self.safe_string(data, 'c'),
+            'lastQty': self.safe_string(data, 'Q'),
+            'bidPrice': self.safe_string(data, 'b'),
+            'askPrice': self.safe_string(data, 'a'),
+            'openPrice': self.safe_string(data, 'o'),
+            'highPrice': self.safe_string(data, 'h'),
+            'lowPrice': self.safe_string(data, 'l'),
+            'volume': self.safe_string(data, 'v'),
+            'quoteVolume': self.safe_string(data, 'q'),
+            'openTime': self.safe_string(data, 'O'),
+            'closeTime': self.safe_string(data, 'C'),
+            'firstId': self.safe_string(data, 'F'),   # First tradeId
+            'lastId': self.safe_string(data, 'L'),    # Last tradeId
+            'count': self.safe_string(data, 'n'),         # Trade count
+        }, market)
+        ticker['info'] = data
+        self.emit('ticker', symbol, ticker)
+
+    def _websocket_handle_ob_rest_snapshot(self, context, error, response):
+        symbol = context['symbol']
+        contextId = context['contextId']
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        config = self._contextGet(contextId, 'config')
+        # print('order book snapshot returned for '+ symbol)
+        if not error:
+            lastUpdateId = self.safe_integer(response, 'nonce')
+            deltas = data['deltas']
+            index = 0
+            for index in range(0, len(deltas)):
+                delta = deltas[index]
+                U = self.safe_integer(delta, 'U')
+                u = self.safe_integer(delta, 'u')
+                if u <= lastUpdateId:
+                    continue
+                if (U <= lastUpdateId + 1) and(u >= lastUpdateId + 1):
+                    break
+                self.emit('err', ExchangeError(self.id + ': error in update ids in deltas for ' + symbol))
+                self.websocketClose(contextId)
+                return
+            # process orderbook
+            for i in range(index, len(deltas)):
+                delta = deltas[i]
+                self.mergeOrderBookDelta(response, delta, None, 'b', 'a')
+            data['ob'] = response
+            data['deltas'] = []
+            if config is not None:
+                self.emit('ob', symbol, self._cloneOrderBook(response, config['ob'][symbol]['limit']))
+            else:
+                self.emit('ob', symbol, self._cloneOrderBook(response))
+            self._contextSetSymbolData(contextId, 'ob', symbol, data)
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob' and event != 'trade' and event != 'ohlcv' and event != 'ticker':
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        if event == 'ob':
+            config = self._contextGet(contextId, 'config')
+            if config is None:
+                config = {}
+            newConfig = {
+                'ob': {},
+            }
+            newConfig['ob'][symbol] = {
+                'limit': self.safe_integer(params, 'limit', None),
+            }
+            config = self.deep_extend(config, newConfig)
+            self._contextSet(contextId, 'config', config)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob' and event != 'trade':
+            raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_on_open(self, contextId, websocketConexConfig):
+        url = websocketConexConfig['url']
+        parts = url.split('=')
+        partsLen = len(parts)
+        if partsLen > 1:
+            streams = parts[1]
+            streams = streams.split('/')
+            for i in range(0, len(streams)):
+                stream = streams[i]
+                pair = stream.split('@')
+                partsLen = len(pair)
+                if partsLen == 2:
+                    # symbol = self.find_symbol(pair[0].upper())
+                    event = pair[1].lower()
+                    if event == 'depth':
+                        event = 'ob'
+                    elif event == 'trade':
+                        event = 'trade'
+                    elif event == 'aggtrade':
+                        event = 'aggtrade'
+                    elif event.find('kline') >= 0:
+                        event = 'kline'
+                    elif event.find('24hrTicker') >= 0:
+                        event = 'ticker'
+                    # self._contextSetSubscribed(contextId, event, symbol, True)
+                    # self._contextSetSubscribing(contextId, event, symbol, False)
+
+    def _websocket_generate_url_stream(self, events, options, params={}):
+        streamList = []
+        for i in range(0, len(events)):
+            element = events[i]
+            parameters = self.extend({
+                'event': element['event'],
+                'symbol': self._websocket_market_id(element['symbol']),
+                'interval': self.safe_string(params, 'timeframe'),
+            }, params)
+            streamGenerator = self.wsconf['events'][element['event']]['conx-param']['stream']
+            streamList.append(self.implode_params(streamGenerator, parameters))
+        stream = '/'.join(streamList)
+        return options['url'] + stream
+
+    def _websocket_market_id(self, symbol):
+        return self.market_id(symbol).lower()
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

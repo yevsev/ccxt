@@ -93,6 +93,26 @@ class theocean extends Exchange {
                 'decimals' => array (),
                 'fetchOrderMethod' => 'fetch_order_from_history',
             ),
+            'wsconf' => array (
+                'conx-tpls' => array (
+                    'default' => array (
+                        'type' => 'ws-io',
+                        'baseurl' => 'wss://ws.theocean.trade/socket.io/?EIO=3&transport=websocket',
+                    ),
+                ),
+                'methodmap' => array (
+                    '_websocketTimeoutRemoveNonce' => '_websocketTimeoutRemoveNonce',
+                ),
+                'events' => array (
+                    'ob' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                ),
+            ),
         ));
     }
 
@@ -915,5 +935,146 @@ class theocean extends Exchange {
                 throw new ExchangeError ($feedback); // unknown $message
             }
         }
+    }
+
+    public function request ($path, $api = 'public', $method = 'GET', $params = array (), $headers = null, $body = null) {
+        $response = $this->fetch2 ($path, $api, $method, $params, $headers, $body);
+        if (gettype ($response) !== 'string') {
+            throw new ExchangeError ($this->id . ' returned a non-string $response => ' . (string) $response);
+        }
+        if (($response[0] === '{' || $response[0] === '[')) {
+            return json_decode ($response, $as_associative_array = true);
+        }
+        return $response;
+    }
+
+    public function _websocket_on_message ($contextId, $data) {
+        $msg = json_decode ($data, $as_associative_array = true);
+        $evtData = $msg[1];
+        $type = $this->safe_string($evtData, 'type');
+        $channel = $this->safe_string($evtData, 'channel');
+        if ($channel === 'order_book') {
+            if ($type === 'snapshot') {
+                $this->_websocket_handle_ob_snapshot ($contextId, $evtData);
+            } else if ($type === 'update') {
+                $this->_websocket_handle_ob_update ($contextId, $evtData);
+            }
+        }
+    }
+
+    public function _websocket_get_symbol_from ($baseId, $quoteId) {
+        $marketId = $baseId . '/' . $quoteId;
+        $market = null;
+        if (is_array ($this->markets_by_id) && array_key_exists ($marketId, $this->markets_by_id)) {
+            $market = $this->markets_by_id[$marketId];
+            return $market['symbol'];
+        }
+        return $marketId;
+    }
+
+    public function _websocket_handle_ob_snapshot ($contextId, $msg) {
+        $channelId = $this->safe_string($msg, 'channelId');
+        $parts = explode ('_', $channelId);
+        $baseId = $parts[2];
+        $quoteId = $parts[3];
+        $symbol = $this->_websocket_get_symbol_from ($baseId, $quoteId);
+        $this->_websocket_handle_subscription ($contextId, 'ob', $symbol);
+        $payload = $this->safe_value($msg, 'payload');
+        $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        $market = $this->market ($symbol);
+        $ob = $this->parse_order_book($payload, null, 'bids', 'asks', 'price', 'availableAmount', $market);
+        $symbolData['ob'] = $ob;
+        $this->emit ('ob', $symbol, $this->_cloneOrderBook ($ob, $symbolData['limit']));
+        $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+    }
+
+    public function _websocket_handle_ob_update ($contextId, $msg) {
+        $channelId = $this->safe_string($msg, 'channelId');
+        $parts = explode ('_', $channelId);
+        $baseId = $parts[2];
+        $quoteId = $parts[3];
+        $symbol = $this->_websocket_get_symbol_from ($baseId, $quoteId);
+        $payload = $this->safe_value($msg, 'payload');
+        $market = $this->market ($symbol);
+        $obUpdate = $this->parse_order_book($payload, null, 'bids', 'asks', 'price', 'availableAmount', $market);
+        $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        $ob = $symbolData['ob'];
+        for ($i = 0; $i < count ($obUpdate['bids']); $i++) {
+            $this->updateBidAsk ($obUpdate['bids'][$i], $ob['bids'], true);
+        }
+        for ($i = 0; $i < count ($obUpdate['asks']); $i++) {
+            $this->updateBidAsk ($obUpdate['asks'][$i], $ob['asks'], false);
+        }
+        $symbolData['ob'] = $ob;
+        $this->emit ('ob', $symbol, $this->_cloneOrderBook ($ob, $symbolData['limit']));
+        $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+    }
+
+    public function _websocket_handle_subscription ($contextId, $event, $symbol) {
+        $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+        if (is_array ($symbolData) && array_key_exists ('sub-nonces', $symbolData)) {
+            $nonces = $symbolData['sub-nonces'];
+            $keys = is_array ($nonces) ? array_keys ($nonces) : array ();
+            for ($i = 0; $i < count ($keys); $i++) {
+                $nonce = $keys[$i];
+                $this->_cancelTimeout ($nonces[$nonce]);
+                $this->emit ($nonce, true);
+            }
+            $symbolData['sub-nonces'] = array ();
+            $this->_contextSetSymbolData ($contextId, $event, $symbol, $symbolData);
+        }
+    }
+
+    public function _websocket_subscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob') {
+            throw new NotSupported ('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        // save $nonce for subscription response
+        $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+        if (!(is_array ($symbolData) && array_key_exists ('sub-nonces', $symbolData))) {
+            $symbolData['sub-nonces'] = array ();
+        }
+        $symbolData['limit'] = $this->safe_integer($params, 'limit', null);
+        $nonceStr = (string) $nonce;
+        $handle = $this->_setTimeout ($contextId, $this->timeout, $this->_websocketMethodMap ('_websocketTimeoutRemoveNonce'), [$contextId, $nonceStr, $event, $symbol, 'sub-nonce']);
+        $symbolData['sub-nonces'][$nonceStr] = $handle;
+        $this->_contextSetSymbolData ($contextId, $event, $symbol, $symbolData);
+        // send request
+        $market = $this->market ($symbol);
+        $this->websocketSendJson ([
+            'data', array (
+                'type' => 'subscribe',
+                'channel' => 'order_book',
+                'payload' => array (
+                    'baseTokenAddress' => $market['baseId'],
+                    'quoteTokenAddress' => $market['quoteId'],
+                    'snapshot' => 'true',
+                    'depth' => $this->safe_string($params, 'depth', '100'),
+                ),
+            ),
+        ]);
+    }
+
+    public function _websocket_unsubscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        throw new NotSupported ('unsubscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+    }
+
+    public function _websocket_timeout_remove_nonce ($contextId, $timerNonce, $event, $symbol, $key) {
+        $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+        if (is_array ($symbolData) && array_key_exists ($key, $symbolData)) {
+            $nonces = $symbolData[$key];
+            if (is_array ($nonces) && array_key_exists ($timerNonce, $nonces)) {
+                $this->omit ($symbolData[$key], $timerNonce);
+                $this->_contextSetSymbolData ($contextId, $event, $symbol, $symbolData);
+            }
+        }
+    }
+
+    public function _get_current_websocket_orderbook ($contextId, $symbol, $limit) {
+        $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if ((is_array ($data) && array_key_exists ('ob', $data)) && ($data['ob'] !== null)) {
+            return $this->_cloneOrderBook ($data['ob'], $limit);
+        }
+        return null;
     }
 }

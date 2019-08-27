@@ -6,8 +6,11 @@
 from ccxt.async_support.base.exchange import Exchange
 import base64
 import hashlib
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import ArgumentsRequired
+from ccxt.base.errors import NotSupported
+from ccxt.base.errors import NetworkError
 
 
 class gemini (Exchange):
@@ -84,6 +87,34 @@ class gemini (Exchange):
                 'trading': {
                     'taker': 0.0035,
                     'maker': 0.001,
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws-s',
+                        'baseurl': 'wss://api.gemini.com/v1/marketdata/',
+                    },
+                },
+                'methodmap': {
+                    'fetchOrderBook': 'fetchOrderBook',
+                    '_websocketHandleObRestSnapshot': '_websocketHandleObRestSnapshot',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}-{symbol}',
+                        },
+                    },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}-{symbol}',
+                        },
+                    },
                 },
             },
         })
@@ -418,3 +449,148 @@ class gemini (Exchange):
             'tag': None,
             'info': response,
         }
+
+    def _websocket_parse_trade(self, trade, symbol, encapsulating_msg):
+        timestamp = encapsulating_msg['timestampms']
+        price = self.safe_float(trade, 'price')
+        amount = self.safe_float(trade, 'amount')
+        return {
+            'id': str(trade['tid']),
+            'info': trade,
+            'timestamp': timestamp,
+            'datetime': self.iso8601(timestamp),
+            'symbol': symbol,
+            'type': None,
+            'side': trade['makerSide'].lower(),
+            'price': price,
+            'cost': price * amount,
+            'amount': amount,
+        }
+
+    def _websocket_handle_trade(self, encapsulating_msg, event, symbol):
+        trade = self._websocket_parse_trade(event, symbol, encapsulating_msg)
+        self.emit('trade', symbol, trade)
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        # console.log(msg)
+        lastSeqId = self._contextGet(contextId, 'sequence_id')
+        seqId = self.safe_integer(msg, 'socket_sequence')
+        if lastSeqId is not None:
+            lastSeqId = lastSeqId + 1
+            if lastSeqId != seqId:
+                self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(lastSeqId) + '+1 !=' + str(seqId) + ')'), contextId)
+                return
+        self._contextSet(contextId, 'sequence_id', seqId)
+        symbol = self._contextGet(contextId, 'symbol')
+        msgType = msg['type']
+        if msgType == 'heartbeat':
+            return
+        if msgType == 'update':
+            events = self.safe_value(msg, 'events', [])
+            symbolData = None
+            obEventActive = False
+            subscribedEvents = self._contextGetEvents(contextId)
+            if 'ob' in subscribedEvents:
+                symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+                obEventActive = True
+                eventsLength = len(events)
+                if eventsLength > 0:
+                    event = events[0]
+                    if (event['type'] == 'change') and(self.safe_string(event, 'reason') == 'initial'):
+                        symbolData['ob'] = {
+                            'bids': [],
+                            'asks': [],
+                            'timestamp': None,
+                            'datetime': None,
+                        }
+                    elif event['type'] == 'change':
+                        timestamp = self.safe_float(msg, 'timestamp')
+                        timestamp = timestamp * 1000
+                        symbolData['ob']['timestamp'] = timestamp
+                        symbolData['ob']['datetime'] = self.iso8601(timestamp)
+                    symbolData['ob']['nonce'] = self.safe_integer(msg, 'eventId')
+            for i in range(0, len(events)):
+                event = events[i]
+                eventType = event['type']
+                if (eventType == 'change') and obEventActive:
+                    side = self.safe_string(event, 'side')
+                    price = self.safe_float(event, 'price')
+                    size = self.safe_float(event, 'remaining')
+                    keySide = 'bids' if (side == 'bid') else 'asks'
+                    self.updateBidAsk([price, size], symbolData['ob'][keySide], side == 'bid')
+                elif eventType == 'trade' and('trade' in list(subscribedEvents.keys())):
+                    self._websocket_handle_trade(msg, event, symbol)
+            if obEventActive:
+                self.emit('ob', symbol, self._cloneOrderBook(symbolData['ob'], symbolData['limit']))  # True even with 'trade', as a trade event has the corresponding ob change event in the same events list
+                self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob' and event != 'trade':
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        if event == 'ob':
+            data = self._contextGetSymbolData(contextId, event, symbol)
+            data['limit'] = self.safe_integer(params, 'limit', None)
+            self._contextSetSymbolData(contextId, event, symbol, data)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob' and event != 'trade':
+            raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_on_open(self, contextId, websocketConexConfig):
+        undef = None
+        self._contextSet(contextId, 'sequence_id', undef)
+        url = websocketConexConfig['url']
+        parts = url.split('?')
+        partsLen = len(parts)
+        if partsLen > 1:
+            params = parts[1]
+            parts = parts[0].split('/')
+            partsLen = len(parts)
+            symbol = parts[partsLen - 1]
+            symbol = self.find_symbol(symbol)
+            self._contextSet(contextId, 'symbol', symbol)
+            params = params.split('&')
+            for i in range(0, len(params)):
+                param = params[i]
+                parts = param.split('=')
+                partsLen = len(parts)
+                # if partsLen > 1:
+                #     event = None
+                #     if parts[0] == 'bids':
+                #         event = 'ob'
+                #     }
+                #     if (event is not None) and(parts[1] == 'true'):
+                #         self._contextSetSubscribed(contextId, event, symbol, True)
+                #         self._contextSetSubscribing(contextId, event, symbol, False)
+                #     }
+                #  }
+
+    def _websocket_generate_url_stream(self, events, options, params={}):
+        # check all events has the same symbol and build parameter list
+        symbol = None
+        urlParams = {
+            'heartbeat': 'true',
+            'bids': 'true',
+            'offers': 'true',
+            'trades': 'true',
+        }
+        for i in range(0, len(events)):
+            event = events[i]
+            if not symbol:
+                symbol = event['symbol']
+            elif symbol != event['symbol']:
+                raise ExchangeError('invalid configuration: not same symbol in event list: ' + symbol + ' ' + event['symbol'])
+            if event['event'] != 'ob' and event['event'] != 'trade':
+                raise ExchangeError('invalid configuration: event not reconigzed ' + event['event'])
+        return options['url'] + self._websocketMarketId(symbol) + '?' + self.urlencode(urlParams)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

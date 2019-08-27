@@ -12,6 +12,7 @@ try:
 except NameError:
     basestring = str  # Python 2
 import math
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import PermissionDenied
@@ -178,6 +179,33 @@ class bitstamp (Exchange):
                 'broad': {
                     'Check your account balance for details.': InsufficientFunds,  # You have only 0.00100000 BTC available. Check your account balance for details.
                     'Ensure self value has at least': InvalidAddress,  # Ensure self value has at least 25 characters(it has 4).
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'pusher',
+                        'baseurl': 'wss://ws-mt1.pusher.com:443/app/de504dc5763aeef9ff52',
+                    },
+                },
+                'methodmap': {
+                    '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
         })
@@ -967,3 +995,144 @@ class bitstamp (Exchange):
                 if broadKey is not None:
                     raise broad[broadKey](feedback)
             raise ExchangeError(feedback)
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        # console.log(data)
+        evt = self.safe_string(msg, 'event')
+        if evt == 'subscription_succeeded':
+            self._websocket_handle_subscription(contextId, msg)
+        elif evt == 'data':
+            chan = self.safe_string(msg, 'channel')
+            if chan.find('order_book') >= 0:
+                self._websocket_handle_orderbook(contextId, msg)
+        elif evt == 'trade':
+            self._websocket_handle_trade(contextId, msg)
+
+    def _websocket_handle_orderbook(self, contextId, msg):
+        chan = self.safe_string(msg, 'channel')
+        parts = chan.split('_')
+        id = 'btcusd'
+        if len(parts) > 2:
+            id = parts[2]
+        symbol = self.find_symbol(id)
+        data = self.safe_value(msg, 'data')
+        timestamp = self.safe_integer(data, 'timestamp')
+        ob = self.parse_order_book(data, timestamp * 1000)
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        symbolData['ob'] = ob
+        self.emit('ob', symbol, self._cloneOrderBook(ob, symbolData['limit']))
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+
+    def _websocket_parse_trade(self, data, symbol):
+        timestamp_ms = int(self.safe_integer(data, 'microtimestamp') / 1000)
+        side = self.safe_string(data, 'type')
+        if side is not None:
+            side = 'sell' if (side == '1') else 'buy'
+        return {
+            'id': self.safe_string(data, 'id'),
+            'info': data,
+            'timestamp': timestamp_ms,
+            'datetime': self.iso8601(timestamp_ms),
+            'symbol': symbol,
+            'type': None,
+            'side': side,
+            'price': self.safe_float(data, 'price'),
+            'amount': self.safe_float(data, 'amount'),
+        }
+
+    def _websocket_handle_trade(self, contextId, msg):
+        # msg example: {'event': 'trade', 'channel': 'live_trades_btceur', 'data': {'microtimestamp': '1551914592860723', 'amount': 0.06388482, 'buy_order_id': 2967695978, 'sell_order_id': 2967695603, 'amount_str': '0.06388482', 'price_str': '3407.43', 'timestamp': '1551914592', 'price': 3407.43, 'type': 0, 'id': 83631877}}
+        chan = self.safe_string(msg, 'channel')
+        parts = chan.split('_')
+        id = 'btcusd'
+        if len(parts) > 2:
+            id = parts[2]
+        symbol = self.find_symbol(id)
+        data = self.safe_value(msg, 'data')
+        trade = self._websocket_parse_trade(data, symbol)
+        self.emit('trade', symbol, trade)
+
+    def _websocket_handle_subscription(self, contextId, msg):
+        chan = self.safe_string(msg, 'channel')
+        event = None
+        if chan.find('order_book') >= 0:
+            event = 'ob'
+        elif chan.find('live_trades') >= 0:
+            event = 'trade'
+        else:
+            event = None
+        if event is not None:
+            parts = chan.split('_')
+            id = 'btcusd'
+            if len(parts) > 2:
+                id = parts[2]
+            symbol = self.find_symbol(id)
+            symbolData = self._contextGetSymbolData(contextId, event, symbol)
+            if 'sub-nonces' in symbolData:
+                nonces = symbolData['sub-nonces']
+                keys = list(nonces.keys())
+                for i in range(0, len(keys)):
+                    nonce = keys[i]
+                    self._cancelTimeout(nonces[nonce])
+                    self.emit(nonce, True)
+                symbolData['sub-nonces'] = {}
+                self._contextSetSymbolData(contextId, event, symbol, symbolData)
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob' and event != 'trade':
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        # save nonce for subscription response
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if not('sub-nonces' in list(symbolData.keys())):
+            symbolData['sub-nonces'] = {}
+        symbolData['limit'] = self.safe_integer(params, 'limit', None)
+        nonceStr = str(nonce)
+        handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce'])
+        channel = None
+        symbolData['sub-nonces'][nonceStr] = handle
+        self._contextSetSymbolData(contextId, event, symbol, symbolData)
+        # send request
+        if event == 'ob':
+            channel = 'order_book'
+        elif event == 'trade':
+            channel = 'live_trades'
+        if symbol != 'BTC/USD':
+            id = self.market_id(symbol)
+            channel = channel + '_' + id
+        self.websocketSendJson({
+            'event': 'subscribe',
+            'channel': channel,
+        }, contextId)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        channel = None
+        if event != 'ob' and event != 'trade':
+            raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        if event == 'ob':
+            channel = 'order_book'
+        elif event == 'trade':
+            channel = 'live_trades'
+        if symbol != 'BTC/USD':
+            id = self.market_id(symbol)
+            channel = channel + '_' + id
+        self.websocketSendJson({
+            'event': 'unsubscribe',
+            'channel': channel,
+        })
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_timeout_remove_nonce(self, contextId, timerNonce, event, symbol, key):
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if key in symbolData:
+            nonces = symbolData[key]
+            if timerNonce in nonces:
+                self.omit(symbolData[key], timerNonce)
+                self._contextSetSymbolData(contextId, event, symbol, symbolData)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

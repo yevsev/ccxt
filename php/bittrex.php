@@ -49,6 +49,7 @@ class bittrex extends Exchange {
                     'account' => 'https://{hostname}/api',
                     'market' => 'https://{hostname}/api',
                     'v2' => 'https://{hostname}/api/v2.0/pub',
+                    'socket' => 'https://socket.{hostname}/signalr',
                 ),
                 'www' => 'https://bittrex.com',
                 'doc' => array (
@@ -102,6 +103,11 @@ class bittrex extends Exchange {
                         'openorders',
                         'selllimit',
                         'sellmarket',
+                    ),
+                ),
+                'socket' => array (
+                    'get' => array (
+                        'negotiate',
                     ),
                 ),
             ),
@@ -201,6 +207,32 @@ class bittrex extends Exchange {
             'commonCurrencies' => array (
                 'BITS' => 'SWIFT',
                 'CPC' => 'CapriCoin',
+            ),
+            'wsconf' => array (
+                'conx-tpls' => array (
+                    'default' => array (
+                        'type' => 'signalr',
+                        'baseurl' => 'wss://socket.bittrex.com/signalr/connect?transport=webSockets&clientProtocol=1.5&connectionToken=',
+                        'tokenUrl' => 'https://socket.bittrex.com/signalr/negotiate?clientProtocol=1.5&connectionData=[array ("name":"c2")]&_=1524596108843',
+                        'disableCertCheck' => true,
+                    ),
+                ),
+                'events' => array (
+                    'ob' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}{ConnectionToken}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                    'trade' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}{ConnectionToken}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                ),
             ),
         ));
     }
@@ -1007,7 +1039,7 @@ class bittrex extends Exchange {
         $url = $this->implode_params($this->urls['api'][$api], array (
             'hostname' => $this->hostname,
         )) . '/';
-        if ($api !== 'v2')
+        if (($api !== 'v2') && ($api !== 'socket'))
             $url .= $this->version . '/';
         if ($api === 'public') {
             $url .= $api . '/' . strtolower ($method) . $path;
@@ -1015,6 +1047,10 @@ class bittrex extends Exchange {
                 $url .= '?' . $this->urlencode ($params);
         } else if ($api === 'v2') {
             $url .= $path;
+            if ($params)
+                $url .= '?' . $this->urlencode ($params);
+        } else if ($api === 'socket') {
+            $url .= '/' . $path;
             if ($params)
                 $url .= '?' . $this->urlencode ($params);
         } else {
@@ -1038,6 +1074,11 @@ class bittrex extends Exchange {
 
     public function handle_errors ($code, $reason, $url, $method, $headers, $body, $response) {
         if ($body[0] === '{') {
+            $response = json_decode ($body, $as_associative_array = true);
+            // array ("Url":"/signalr","ConnectionToken":"...","ConnectionId":"...","KeepAliveTimeout":20.0,"DisconnectTimeout":30.0,"ConnectionTimeout":110.0,"TryWebSockets":true,"ProtocolVersion":"1.5","TransportConnectTimeout":5.0,"LongPollDelay":0.0)
+            $responseUrl = $this->safe_value($response, 'Url');
+            if ($responseUrl !== null)
+                return $response;
             // array ( $success => false, $message => "$message" )
             $success = $this->safe_value($response, 'success');
             if ($success === null)
@@ -1115,5 +1156,185 @@ class bittrex extends Exchange {
         if (($api === 'account') || ($api === 'market'))
             $this->options['hasAlreadyAuthenticatedSuccessfully'] = true;
         return $response;
+    }
+
+    public function _websocket_on_init ($contextId, $websocketConfig) {
+        $connectionData = [array ( 'name' => 'c2' )];
+        $response = $this->socketGetNegotiate (array (
+            'clientProtocol' => '1.5',
+            'connectionData' => $this->json ($connectionData),
+            '_' => $this->milliseconds (),
+        ));
+        $websocketConfig['url'] = $this->implode_params($websocketConfig['url'], array (
+            'ConnectionToken' => $this->encode_uri_component($response['ConnectionToken']),
+        ));
+        return $websocketConfig;
+    }
+
+    public function _websocket_on_message ($contextId, $data) {
+        // WebsocketConnection => array ("C":"d-30A89C0B-B2bAF,1","S":1,"M":array ())
+        // WebsocketConnection => array ("C":"d-30A89C0B-B2bAF,2|Dj,DCF8B","G":"et1LtGEPps9CyZOiEwC3001IWa/rSLKX1sIKLK72TYwa09sSsFAeLZnCBYIzUB85QtVktyet7lOC5k522VZoWFrJ+QDfFvR5yfYxsqxMhOe4yp9J8XyzG3VGxPxW+CsuekQh/w==","M":array ())
+        // WebsocketConnection => array ("R":true,"I":"1548327501")
+        // WebsocketConnection => array ("C":"d-30A89C0B-B2bAF,2|Dj,DCF8C","M":[{"H":"C2","M":"uE","A":["Xc6xDgIhEIThd5kaybIsC2yptproYaHG1pe48O6e8YjJTfM3XzEzTjDcpmPb7dsBDmdYpRSIHR6w54x2hwWHKyymKJ6oJqqaHS4w8tTdj9Ag5KvEkAPzIBpKZspD8l/SulUm0ZKryFZy3cogqlqE+sthWm4ueX/TPw=="])]}
+        // WebsocketConnection => array ("C":"d-30A89C0B-B2bAF,2|Dj,DCF8D","M":[{"H":"C2","M":"uE","A":["Lcw7DoAgEIThu0y9kiUriFuqrSYqFmpsvYTh7uLjb6b5Mhd6KJa5i0UTWxAGaM3OshA26H4hrlBLmKDiRIwXseJDRRihbDjRR/glIZjKhZJzLyhdJn/pIMz5Ms/5TLoB"])]}
+        // WebsocketConnection => array ("C":"d-30A89C0B-B2bAF,2|Dj,DCF8E","M":[{"H":"C2","M":"uE","A":["bc4xDsIwDIXhu7w5WHYSN3ZGYAUJWgZAXblE1bu3QlUFBW+WPv32gBMqbu2x2+27AwLOqM4qnAMeqM8B3R1VAq6oSZNTEebYGAdcUJl4DBvC5DlJkRi3hBcSjUTVXPJaKcrsJX1LbYiXebu4rmMf0P58p0wpmbmJ/T/dZHdy/0jORHRNvuZkP04="])]}
+        // WebsocketConnection => array ("I":"1548328520","E":"There was an $error invoking Hub $method 'c2.SubscribeToExchangeDeltas'.")
+        // better to create SignalR Class to do all of this?
+        $msg = json_decode ($data, $as_associative_array = true);
+        $opIndex = $this->safe_string($msg, 'I');
+        if ($opIndex !== null) {
+            // response to a request
+            $result = $this->safe_value($msg, 'R');
+            $error = $this->safe_value($msg, 'E');
+            if ($opIndex !== null) {
+                if (mb_strpos ($opIndex, 'ob-sub_') === 0) {
+                    $rest = str_replace ('ob-sub_', '', $opIndex);
+                    $parts = explode ('_', $rest);
+                    $nonce = $parts[0];
+                    $id = str_replace ($nonce . '_', '', $rest);
+                    $this->emit ($nonce, $result, new ExchangeError ($error));
+                    if ($result === true) {
+                        $this->websocketSendJson (array (
+                            'H' => 'c2',
+                            'M' => 'QueryExchangeState',
+                            'A' => [$id],
+                            'I' => 'snapshot_' . $rest,
+                        ));
+                    }
+                } else if (mb_strpos ($opIndex, 'snapshot_') === 0) {
+                    $data = $this->inflateRaw ($result, 'base64');
+                    $parsedData = json_decode ($data, $as_associative_array = true);
+                    $this->_websocket_handle_order_book_snapshot ($contextId, $parsedData);
+                }
+            }
+        } else {
+            // TODO => check sequence number
+            $messages = $this->safe_value($msg, 'M');
+            if ($messages !== null) {
+                for ($i = 0; $i < count ($messages); $i++) {
+                    $hub = $this->safe_string($messages[$i], 'H');
+                    $method = $this->safe_string($messages[$i], 'M');
+                    $methodArgs = $this->safe_value($messages[$i], 'A');
+                    if ($hub === 'C2') {
+                        if ($method === 'uE') {
+                            $data = $this->inflateRaw ($methodArgs[0], 'base64');
+                            $parsedData = json_decode ($data, $as_associative_array = true);
+                            $this->_websocket_handle_order_book_delta ($contextId, $parsedData);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public function _websocket_parse_trade ($trade, $symbol) {
+        // Websocket $trade format different than REST $trade format
+        $id = $this->safe_string($trade, 'FI');
+        $side = 'sell';
+        if ($this->safe_string($trade, 'OT') === 'BUY') {
+            $side = 'buy';
+        }
+        $price = $this->safe_float($trade, 'R');
+        $amount = $this->safe_float($trade, 'Q');
+        $timestamp = $this->safe_integer($trade, 'T');
+        return array (
+            'id' => $id,
+            'info' => $trade,
+            'timestamp' => $timestamp,
+            'datetime' => $this->iso8601 ($timestamp),
+            'symbol' => $symbol,
+            'type' => null,
+            'side' => $side,
+            'price' => $price,
+            'amount' => $amount,
+        );
+    }
+
+    public function _websocket_handle_order_book_snapshot ($contextId, $data) {
+        $id = $this->safe_string($data, 'M');
+        $symbol = $this->find_symbol($id);
+        if (!$this->_contextIsSubscribed ($contextId, 'ob', $symbol)) {
+            return;
+        }
+        $ob = $this->parse_order_book($data, null, 'Z', 'S', 'R', 'Q');
+        $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        $symbolData['ob'] = $ob;
+        $this->emit ('ob', $symbol, $this->_cloneOrderBook ($symbolData['ob'], $symbolData['limit']));
+        $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+    }
+
+    public function _websocket_handle_order_book_delta ($contextId, $data) {
+        // array ("M":"USDT-BTC","N":912014,"Z":[{"TY":0,"R":3504.97634920,"Q":0.26480207),array ("TY":1,"R":3504.97634919,"Q":0.0)],"S":[array ("TY":0,"R":3579.37236706,"Q":0.21455380),array ("TY":1,"R":6429.20850000,"Q":0.0)],"f":array ()}
+        $id = $this->safe_string($data, 'M');
+        $symbol = $this->find_symbol($id);
+        if ($this->_contextIsSubscribed ($contextId, 'ob', $symbol)) {
+            $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+            if (is_array ($symbolData) && array_key_exists ('ob', $symbolData)) {
+                // snapshot previously received, else throw it
+                $bids = $this->safe_value($data, 'Z');
+                $asks = $this->safe_value($data, 'S');
+                if ($bids !== null) {
+                    for ($i = 0; $i < count ($bids); $i++) {
+                        $elemType = $this->safe_integer($bids[$i], 'TY');
+                        $price = $this->safe_float($bids[$i], 'R');
+                        $amount = $this->safe_float($bids[$i], 'Q');
+                        // 0 = ADD, 1 = REMOVE, 2 = UPDATE
+                        if ($elemType === 1) {
+                            $this->updateBidAsk ([$price, 0], $symbolData['ob']['bids'], true);
+                        } else {
+                            $this->updateBidAsk ([$price, $amount], $symbolData['ob']['bids'], true);
+                        }
+                    }
+                }
+                if ($asks !== null) {
+                    for ($i = 0; $i < count ($asks); $i++) {
+                        $elemType = $this->safe_integer($asks[$i], 'TY');
+                        $price = $this->safe_float($asks[$i], 'R');
+                        $amount = $this->safe_float($asks[$i], 'Q');
+                        // 0 = ADD, 1 = REMOVE, 2 = UPDATE
+                        if ($elemType === 1) {
+                            $this->updateBidAsk ([$price, 0], $symbolData['ob']['asks'], false);
+                        } else {
+                            $this->updateBidAsk ([$price, $amount], $symbolData['ob']['asks'], false);
+                        }
+                    }
+                }
+                $this->emit ('ob', $symbol, $this->_cloneOrderBook ($symbolData['ob'], $symbolData['limit']));
+                $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+            }
+        }
+        if ($this->_contextIsSubscribed ($contextId, 'trade', $symbol)) {
+            $fills = $this->safe_value($data, 'f');
+            if ($fills !== null) {
+                for ($i = 0; $i < count ($fills); $i++) {
+                    $trade = $this->_websocket_parse_trade ($fills[$i], $symbol);
+                    $this->emit ('trade', $symbol, $trade);
+                }
+            }
+        }
+    }
+
+    public function _websocket_subscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob' && $event !== 'trade') {
+            throw new NotSupported ('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        if ($event === 'ob') {
+            $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+            $symbolData['limit'] = $this->safe_integer($params, 'limit', null);
+            $this->_contextSetSymbolData ($contextId, $event, $symbol, $symbolData);
+        }
+        $nonceStr = (string) $nonce;
+        if (!$this->_contextIsSubscribed ($contextId, 'ob', $symbol) && !$this->_contextIsSubscribed ($contextId, 'trade', $symbol)) {
+            // send request
+            $id = $this->market_id($symbol);
+            $this->websocketSendJson (array (
+                'H' => 'c2',
+                'M' => 'SubscribeToExchangeDeltas',
+                'A' => [$id],
+                'I' => 'ob-sub_' . $nonceStr . '_' . $id,
+            ));
+        } else {
+            $this->emit ($nonceStr, true);
+        }
     }
 }

@@ -13,12 +13,14 @@ except NameError:
     basestring = str  # Python 2
 import hashlib
 import math
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import ArgumentsRequired
 from ccxt.base.errors import InsufficientFunds
 from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import OrderNotFound
+from ccxt.base.errors import NotSupported
 from ccxt.base.errors import DDoSProtection
 from ccxt.base.errors import ExchangeNotAvailable
 
@@ -138,6 +140,26 @@ class zb (Exchange):
                         'repay',
                         'getRepayments',
                     ],
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://api.zb.com:9999/websocket',
+                    },
+                },
+                'methodmap': {
+                    '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
             'fees': {
@@ -591,3 +613,101 @@ class zb (Exchange):
                         raise ExchangeNotAvailable(feedback)
                     else:
                         raise ExchangeError(feedback)
+
+    def ends_with(self, s1, s2):
+        index = s1.find(s2)
+        strLen = len(s1) - 0  # a transpiler workaround
+        return(index == (strLen - len(s2)))
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        success = self.safe_value(msg, 'success', True)
+        channel = self.safe_string(msg, 'channel')
+        pairId = None
+        channelType = None
+        if self.ends_with(channel, '_depth'):
+            channelType = 'ob'
+            pairId = channel.replace('_depth', '')
+        else:
+            # could not determine channel
+            return
+        pairIdList = self._contextGet(contextId, 'pairids')
+        if pairIdList is None:
+            self.emit('err', ExchangeError(self.id + ' internal error: unitialized pairids dict in context '))
+            return
+        if not(pairId in list(pairIdList.keys())):
+            self.emit('err', ExchangeError(self.id + ' error receiving unexpected market id ' + pairId))
+            return
+        id = pairIdList[pairId]
+        symbol = self.find_symbol(id)
+        if not success:
+            code = self.safe_string(msg, 'code', '0')
+            errMsg = self.safe_string(msg, 'message', 'unknown error')
+            # error?
+            if channelType == 'ob':
+                ex = ExchangeError(self.id + ' subscribing error(code: ' + code + ' error: ' + errMsg + ')')
+                self._websocket_emit_ob_subscription(contextId, symbol, False, ex)
+            return
+        if channelType == 'ob':
+            self._websocket_emit_ob_subscription(contextId, symbol, True, None)
+            self._websocket_handle_ob(contextId, msg, symbol)
+
+    def _websocket_emit_ob_subscription(self, contextId, symbol, success, exception):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if 'sub-nonces' in data:
+            nonces = data['sub-nonces']
+            keys = list(nonces.keys())
+            for i in range(0, len(keys)):
+                nonce = keys[i]
+                self._cancelTimeout(nonces[nonce])
+                self.emit(nonce, success, exception)
+            data['sub-nonces'] = {}
+            self._contextSetSymbolData(contextId, 'ob', symbol, data)
+
+    def _websocket_handle_ob(self, contextId, msg, symbol):
+        ob = self.parse_order_book(msg)
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        data['ob'] = ob
+        self._contextSetSymbolData(contextId, 'ob', symbol, data)
+        self.emit('ob', symbol, self._cloneOrderBook(ob, data['limit']))
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        id = self.market_id(symbol)
+        pairId = id.replace('_', '')
+        payload = {
+            'event': 'addChannel',
+            'channel': pairId + '_depth',
+        }
+        pairIdList = self._contextGet(contextId, 'pairids')
+        if pairIdList is None:
+            pairIdList = {}
+        pairIdList[pairId] = id
+        self._contextSet(contextId, 'pairids', pairIdList)
+        data = self._contextGetSymbolData(contextId, event, symbol)
+        if not('sub-nonces' in list(data.keys())):
+            data['sub-nonces'] = {}
+        nonceStr = str(nonce)
+        handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonces'])
+        data['sub-nonces'][nonceStr] = handle
+        data['limit'] = self.safe_value(params, 'limit')
+        self._contextSetSymbolData(contextId, event, symbol, data)
+        self.websocketSendJson(payload)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+
+    def _websocket_timeout_remove_nonce(self, contextId, timerNonce, event, symbol, key):
+        data = self._contextGetSymbolData(contextId, event, symbol)
+        if key in data:
+            nonces = data[key]
+            if timerNonce in nonces:
+                self.omit(data[key], timerNonce)
+                self._contextSetSymbolData(contextId, event, symbol)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

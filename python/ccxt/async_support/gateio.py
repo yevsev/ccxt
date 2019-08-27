@@ -13,6 +13,7 @@ except NameError:
     basestring = str  # Python 2
 import hashlib
 import math
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import ArgumentsRequired
 from ccxt.base.errors import InsufficientFunds
@@ -107,6 +108,23 @@ class gateio (Exchange):
                         'tradeHistory',
                         'withdraw',
                     ],
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://ws.gateio.io/v3/',
+                    },
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
             'fees': {
@@ -753,3 +771,64 @@ class gateio (Exchange):
             elif not result:
                 raise ExchangeError(message)
         return response
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        oid = self.safe_string(msg, 'id')
+        method = self.safe_string(msg, 'method')
+        if method is None:
+            # subscription response
+            # status = self.safe_string(msg['result'], 'status')
+            self.emit(oid, True)
+        else:
+            if method == 'depth.update':
+                self._websocket_handle_ob(contextId, msg)
+
+    def _websocket_handle_ob(self, contextId, msg):
+        params = self.safe_value(msg, 'params')
+        clean = params[0]
+        ob = params[1]
+        symbol = self.find_symbol(params[2].lower())
+        if clean:
+            ob = self.parse_order_book(ob, None)
+            data = self._contextGetSymbolData(contextId, 'ob', symbol)
+            data['ob'] = ob
+            self._contextSetSymbolData(contextId, 'ob', symbol, data)
+            self.emit('ob', symbol, self._cloneOrderBook(ob, data['limit']))
+        else:
+            data = self._contextGetSymbolData(contextId, 'ob', symbol)
+            obMerged = self.mergeOrderBookDelta(data['ob'], ob, None)
+            data['ob'] = obMerged
+            self._contextSetSymbolData(contextId, 'ob', symbol, data)
+            self.emit('ob', symbol, self._cloneOrderBook(obMerged, data['limit']))
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        id = self.market_id(symbol).upper()
+        payload = {
+            'id': nonce,
+            'method': 'depth.subscribe',
+            'params': [id, 30, '0.00001'],
+        }
+        data = self._contextGetSymbolData(contextId, event, symbol)
+        data['limit'] = self.safe_integer(params, 'limit', None)
+        self._contextSetSymbolData(contextId, event, symbol, data)
+        self.websocketSendJson(payload)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        id = self.market_id(symbol).upper()
+        payload = {
+            'id': nonce,
+            'method': 'depth.unsubscribe',
+            'params': [id],
+        }
+        self.websocketSendJson(payload)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

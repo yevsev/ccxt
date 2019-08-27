@@ -135,6 +135,61 @@ class binance extends Exchange {
                     ),
                 ),
             ),
+            'wsconf' => array (
+                'conx-tpls' => array (
+                    'default' => array (
+                        'type' => 'ws-s',
+                        'baseurl' => 'wss://stream.binance.com:9443/stream?streams=',
+                    ),
+                ),
+                'methodmap' => array (
+                    'fetchOrderBook' => 'fetchOrderBook',
+                    '_websocketHandleObRestSnapshot' => '_websocketHandleObRestSnapshot',
+                    '_websocketSendHeartbeat' => '_websocketSendHeartbeat',
+                ),
+                'events' => array (
+                    'ob' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                            'stream' => '{symbol}@depth',
+                        ),
+                    ),
+                    'aggtrade' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                            'stream' => '{symbol}@aggTrade',
+                        ),
+                    ),
+                    'trade' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                            'stream' => '{symbol}@trade',
+                        ),
+                    ),
+                    'ohlcv' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                            'stream' => '{symbol}@kline_{interval}',
+                        ),
+                    ),
+                    'ticker' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                            'stream' => '{symbol}@ticker',
+                        ),
+                    ),
+                ),
+            ),
             'fees' => array (
                 'trading' => array (
                     'tierBased' => false,
@@ -1311,5 +1366,253 @@ class binance extends Exchange {
         if (($api === 'private') || ($api === 'wapi'))
             $this->options['hasAlreadyAuthenticatedSuccessfully'] = true;
         return $response;
+    }
+
+    public function _websocket_on_message ($contextId, $data) {
+        $msg = json_decode ($data, $as_associative_array = true);
+        $stream = $this->safe_string($msg, 'stream');
+        $resData = $this->safe_value($msg, 'data', array ());
+        $parts = explode ('@', $stream);
+        $partsLen = is_array ($parts) ? count ($parts) : 0;
+        if ($partsLen === 2) {
+            $msgType = $parts[1];
+            if ($msgType === 'depth') {
+                $this->_websocket_handle_ob ($contextId, $resData);
+            } else if ($msgType === 'trade') {
+                $this->_websocket_handle_trade ($contextId, $resData);
+            } else if ($msgType === 'aggTrade') {
+                $this->_websocket_handle_trade ($contextId, $resData);
+            } else if (mb_strpos ($msgType, 'kline') !== false) {
+                $this->_websocket_handle_kline ($contextId, $resData);
+            } else if ($msgType === 'ticker') {
+                $this->_websocket_handle_ticker ($contextId, $resData);
+            }
+        }
+    }
+
+    public function _websocket_handle_ob ($contextId, $data) {
+        $symbol = $this->find_symbol($this->safe_string($data, 's'));
+        // if asyncContext has no previous orderbook you have to cache all $deltas
+        // and fetch orderbook from rest api
+        $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if (!(is_array ($symbolData) && array_key_exists ('ob', $symbolData))) {
+            if (!(is_array ($symbolData) && array_key_exists ('deltas', $symbolData))) {
+                $symbolData['deltas'] = array ();
+            }
+            $deltas = $symbolData['deltas'];
+            $partsLen = is_array ($deltas) ? count ($deltas) : 0;
+            if ($partsLen > 50) {
+                if (!(is_array ($symbolData) && array_key_exists ('failCount', $symbolData))) {
+                    $symbolData['failCount'] = 0;
+                }
+                $symbolData['failCount'] = $symbolData['failCount'] . 1;
+                if ($symbolData['failCount'] > 5) {
+                    $this->emit ('err', new ExchangeError ($this->id . ' => max $deltas failCount reached for $symbol ' . $symbol));
+                    $this->websocketClose ($contextId);
+                } else {
+                    // Launch again
+                    delete $symbolData['ob'];
+                    delete $symbolData['deltas'];
+                }
+                $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+            } else {
+                $symbolData['deltas'][] = $data;
+                if (!(is_array ($symbolData) && array_key_exists ('snaplaunched', $symbolData))) {
+                    $symbolData['snaplaunched'] = true;
+                    $this->_executeAndCallback ($contextId, $this->_websocketMethodMap ('fetchOrderBook'), [$symbol], $this->_websocketMethodMap ('_websocketHandleObRestSnapshot'), array (
+                        'symbol' => $symbol,
+                        'contextId' => $contextId,
+                    ));
+                }
+                $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+            }
+        } else {
+            $config = $this->_contextGet ($contextId, 'config');
+            $symbolData['ob'] = $this->mergeOrderBookDelta ($symbolData['ob'], $data, $data['E'], 'b', 'a');
+            if ($config !== null) {
+                $this->emit ('ob', $symbol, $this->_cloneOrderBook ($symbolData['ob'], $config['ob'][$symbol]['limit']));
+            } else {
+                $this->emit ('ob', $symbol, $this->_cloneOrderBook ($symbolData['ob']));
+            }
+            $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+        }
+    }
+
+    public function _websocket_handle_trade ($contextId, $data) {
+        $symbol = $this->find_symbol($this->safe_string($data, 's'));
+        $market = $this->market ($symbol);
+        $trade = $this->parse_trade($data, $market);
+        $this->emit ('trade', $symbol, $trade);
+    }
+
+    public function _websocket_handle_kline ($contextId, $data) {
+        $symbol = $this->find_symbol($this->safe_string($data, 's'));
+        $market = $this->market ($symbol);
+        $kline = $this->parse_ohlcv([
+            $this->safe_float($data['k'], 't'),
+            $this->safe_float($data['k'], 'o'),
+            $this->safe_float($data['k'], 'c'),
+            $this->safe_float($data['k'], 'h'),
+            $this->safe_float($data['k'], 'l'),
+            $this->safe_float($data['k'], 'v'),
+        ], $market, $this->safe_float($data, 'i'));
+        $this->emit ('ohlcv', $symbol, $kline);
+    }
+
+    public function _websocket_handle_ticker ($contextId, $data) {
+        $symbol = $this->find_symbol($this->safe_string($data, 's'));
+        $market = $this->market ($symbol);
+        $ticker = $this->parse_ticker(array (
+            'symbol' => $this->safe_string($data, 's'),
+            'priceChange' => $this->safe_string($data, 'p'),
+            'priceChangePercent' => $this->safe_string($data, 'P'),
+            'weightedAvgPrice' => $this->safe_string($data, 'v'),
+            'prevClosePrice' => $this->safe_string($data, 'x'),
+            'lastPrice' => $this->safe_string($data, 'c'),
+            'lastQty' => $this->safe_string($data, 'Q'),
+            'bidPrice' => $this->safe_string($data, 'b'),
+            'askPrice' => $this->safe_string($data, 'a'),
+            'openPrice' => $this->safe_string($data, 'o'),
+            'highPrice' => $this->safe_string($data, 'h'),
+            'lowPrice' => $this->safe_string($data, 'l'),
+            'volume' => $this->safe_string($data, 'v'),
+            'quoteVolume' => $this->safe_string($data, 'q'),
+            'openTime' => $this->safe_string($data, 'O'),
+            'closeTime' => $this->safe_string($data, 'C'),
+            'firstId' => $this->safe_string($data, 'F'),   // First tradeId
+            'lastId' => $this->safe_string($data, 'L'),    // Last tradeId
+            'count' => $this->safe_string($data, 'n'),         // Trade count
+        ), $market);
+        $ticker['info'] = $data;
+        $this->emit ('ticker', $symbol, $ticker);
+    }
+
+    public function _websocket_handle_ob_rest_snapshot ($context, $error, $response) {
+        $symbol = $context['symbol'];
+        $contextId = $context['contextId'];
+        $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        $config = $this->_contextGet ($contextId, 'config');
+        // var_dump ('order book snapshot returned for '+ $symbol);
+        if (!$error) {
+            $lastUpdateId = $this->safe_integer($response, 'nonce');
+            $deltas = $data['deltas'];
+            $index = 0;
+            for ($index = 0; $index < count ($deltas); $index++) {
+                $delta = $deltas[$index];
+                $U = $this->safe_integer($delta, 'U');
+                $u = $this->safe_integer($delta, 'u');
+                if ($u <= $lastUpdateId) {
+                    continue;
+                }
+                if (($U <= $lastUpdateId . 1) && ($u >= $lastUpdateId . 1)) {
+                    break;
+                }
+                $this->emit ('err', new ExchangeError ($this->id . ' => $error in update ids in $deltas for ' . $symbol));
+                $this->websocketClose ($contextId);
+                return;
+            }
+            // process orderbook
+            for ($i = $index; $i < count ($deltas); $i++) {
+                $delta = $deltas[$i];
+                $this->mergeOrderBookDelta ($response, $delta, null, 'b', 'a');
+            }
+            $data['ob'] = $response;
+            $data['deltas'] = array ();
+            if ($config !== null) {
+                $this->emit ('ob', $symbol, $this->_cloneOrderBook ($response, $config['ob'][$symbol]['limit']));
+            } else {
+                $this->emit ('ob', $symbol, $this->_cloneOrderBook ($response));
+            }
+            $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $data);
+        }
+    }
+
+    public function _websocket_subscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob' && $event !== 'trade' && $event !== 'ohlcv' && $event !== 'ticker') {
+            throw new NotSupported ('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        if ($event === 'ob') {
+            $config = $this->_contextGet ($contextId, 'config');
+            if ($config === null) {
+                $config = array ();
+            }
+            $newConfig = array (
+                'ob' => array (),
+            );
+            $newConfig['ob'][$symbol] = array (
+                'limit' => $this->safe_integer($params, 'limit', null),
+            );
+            $config = array_replace_recursive ($config, $newConfig);
+            $this->_contextSet ($contextId, 'config', $config);
+        }
+        $nonceStr = (string) $nonce;
+        $this->emit ($nonceStr, true);
+    }
+
+    public function _websocket_unsubscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob' && $event !== 'trade') {
+            throw new NotSupported ('unsubscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        $nonceStr = (string) $nonce;
+        $this->emit ($nonceStr, true);
+    }
+
+    public function _websocket_on_open ($contextId, $websocketConexConfig) {
+        $url = $websocketConexConfig['url'];
+        $parts = explode ('=', $url);
+        $partsLen = is_array ($parts) ? count ($parts) : 0;
+        if ($partsLen > 1) {
+            $streams = $parts[1];
+            $streams = explode ('/', $streams);
+            for ($i = 0; $i < count ($streams); $i++) {
+                $stream = $streams[$i];
+                $pair = explode ('@', $stream);
+                $partsLen = is_array ($pair) ? count ($pair) : 0;
+                if ($partsLen === 2) {
+                    // $symbol = $this->find_symbol(strtoupper ($pair[0]));
+                    $event = strtolower ($pair[1]);
+                    if ($event === 'depth')
+                        $event = 'ob';
+                    else if ($event === 'trade')
+                        $event = 'trade';
+                    else if ($event === 'aggtrade')
+                        $event = 'aggtrade';
+                    else if (mb_strpos ($event, 'kline') !== false)
+                        $event = 'kline';
+                    else if (mb_strpos ($event, '24hrTicker') !== false)
+                        $event = 'ticker';
+                    // $this->_contextSetSubscribed ($contextId, $event, $symbol, true);
+                    // $this->_contextSetSubscribing ($contextId, $event, $symbol, false);
+                }
+            }
+        }
+    }
+
+    public function _websocket_generate_url_stream ($events, $options, $params = array ()) {
+        $streamList = array ();
+        for ($i = 0; $i < count ($events); $i++) {
+            $element = $events[$i];
+            $parameters = array_merge (array (
+                'event' => $element['event'],
+                'symbol' => $this->_websocket_market_id ($element['symbol']),
+                'interval' => $this->safe_string($params, 'timeframe'),
+            ), $params);
+            $streamGenerator = $this->wsconf['events'][$element['event']]['conx-param']['stream'];
+            $streamList[] = $this->implode_params($streamGenerator, $parameters);
+        }
+        $stream = implode ('/', $streamList);
+        return $options['url'] . $stream;
+    }
+
+    public function _websocket_market_id ($symbol) {
+        return strtolower ($this->market_id($symbol));
+    }
+
+    public function _get_current_websocket_orderbook ($contextId, $symbol, $limit) {
+        $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if ((is_array ($data) && array_key_exists ('ob', $data)) && ($data['ob'] !== null)) {
+            return $this->_cloneOrderBook ($data['ob'], $limit);
+        }
+        return null;
     }
 }

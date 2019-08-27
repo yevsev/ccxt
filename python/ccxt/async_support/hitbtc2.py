@@ -13,11 +13,13 @@ except NameError:
     basestring = str  # Python 2
 import base64
 import math
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import PermissionDenied
 from ccxt.base.errors import InsufficientFunds
 from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import OrderNotFound
+from ccxt.base.errors import NotSupported
 from ccxt.base.errors import ExchangeNotAvailable
 from ccxt.base.decimal_to_precision import TRUNCATE
 from ccxt.base.decimal_to_precision import DECIMAL_PLACES
@@ -566,6 +568,23 @@ class hitbtc2 (hitbtc):
                 '2020': InvalidOrder,  # "Price not a valid number"
                 '20002': OrderNotFound,  # canceling non-existent order
                 '20001': InsufficientFunds,
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://api.hitbtc.com/api/2/ws',
+                    },
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
             },
         })
 
@@ -1363,3 +1382,129 @@ class hitbtc2 (hitbtc):
                     if message == 'Duplicate clientOrderId':
                         raise InvalidOrder(feedback)
             raise ExchangeError(feedback)
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        # TODO: if (msg.error) error handle
+        method = self.safe_string(msg, 'method')
+        if method is not None:
+            if method == 'snapshotOrderbook':
+                # orderbook = msg.params
+                # :parse orderbook
+                # console.log('orderbook>>>', orderbook)
+                self._websocket_handle_snapshot_orderbook(contextId, msg)
+            elif method == 'updateOrderbook':
+                # orderbook = msg.params
+                # TODO:update orderbook
+                # console.log('update orderbook>>>', orderbook)
+                self._websocket_handle_update_orderbook(contextId, msg)
+
+    def _websocket_handle_snapshot_orderbook(self, contextId, data):
+        timestamp = None
+        obdata = self.safe_value(data, 'params')
+        rawsymbol = self.safe_value(obdata, 'symbol')
+        market = self.markets_by_id[rawsymbol]
+        symbol = market['symbol']
+        # :parse orderbook
+        ob = self.parse_order_book(obdata, timestamp, 'bid', 'ask', 'price', 'size')
+        # console.log('parsed',ob)
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        symbolData['ob'] = ob
+        symbolData['rawData'] = obdata
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+        self.emit('ob', symbol, self._cloneOrderBook(symbolData['ob'], symbolData['limit']))
+
+    def _websocket_is_zero_size(self, size):
+        # hitbtc - their doc is really bad, how many 0 will it have?
+        return size == '0' or size == '0.0' or size == '0.00' or size == '0.000' or size == '0.0000'
+
+    def _websocket_update_order(self, items, updates):
+        for j in range(0, len(updates)):
+            o = updates[j]
+            removeItem = -1
+            addItem = True
+            for i in range(0, len(items)):
+                item = items[i]
+                if o['price'] == item['price']:
+                    if self._websocket_is_zero_size(o['size']):
+                       removeItem = i
+                    else:
+                       item['size'] = o['size']
+                    addItem = False
+            if removeItem > -1:
+               items.splice(removeItem,1)
+            if addItem:
+               items.append(o)
+        return items
+
+    def _websocket_handle_update_orderbook(self, contextId, data):
+        timestamp = None
+        obdata = self.safe_value(data, 'params')
+        rawsymbol = self.safe_value(obdata, 'symbol')
+        market = self.markets_by_id[rawsymbol]
+        symbol = market['symbol']
+        symbolData = self._contextGetSymbolData(
+            contextId,
+            'ob',
+            symbol
+        )
+        # :get updated last raw ob
+        rawData = symbolData['rawData']
+        # console.log('>>>>>>get last raw',rawData)
+        # :update,remove size = 0,check sequence
+        rawData['ask'] = self._websocket_update_order(rawData['ask'], obdata['ask'])
+        rawData['bid'] = self._websocket_update_order(rawData['bid'], obdata['bid'])
+        # console.log('updated raw',rawData,obdata)
+        # :parse orderbook
+        ob = self.parse_order_book(rawData, timestamp, 'bid', 'ask', 'price', 'size')
+        # console.log('parsed',ob)
+        # :update last raw ob
+        symbolData['ob'] = ob
+        symbolData['rawData'] = rawData
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+        self.emit('ob', symbol, self._cloneOrderBook(symbolData['ob'], symbolData['limit']))
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        data = self._contextGetSymbolData(contextId, event, symbol)
+        # depth from 0 to 5
+        # see https://github.com/huobiapi/API_Docs/wiki/WS_api_reference#%E8%AE%A2%E9%98%85-market-depth-%E6%95%B0%E6%8D%AE-marketsymboldepthtype
+        data['depth'] = self.safe_integer(params, 'depth', '50')
+        data['limit'] = self.safe_integer(params, 'limit', 200)
+        # it is not limit
+        # data['limit'] = params['depth']
+        self._contextSetSymbolData(contextId, event, symbol, data)
+        rawsymbol = self.market_id(symbol)
+        sendJson = {
+            'method': 'subscribeOrderbook',
+            'params': {
+                'symbol': rawsymbol,
+            },
+            'id': rawsymbol,
+        }
+        self.websocketSendJson(sendJson)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        params['depth'] = params['depth'] or '50'
+        rawsymbol = self.market_id(symbol)
+        sendJson = {
+            'method': 'unsubscribeOrderbook',
+            'params': {
+                'symbol': rawsymbol,
+            },
+            'id': rawsymbol,
+        }
+        self.websocketSendJson(sendJson)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if 'ob' in data and data['ob'] is not None:
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

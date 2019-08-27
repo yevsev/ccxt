@@ -6,6 +6,7 @@
 from ccxt.async_support.base.exchange import Exchange
 import hashlib
 import math
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import PermissionDenied
@@ -15,6 +16,7 @@ from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import OrderNotFound
 from ccxt.base.errors import OrderNotCached
 from ccxt.base.errors import CancelPending
+from ccxt.base.errors import NotSupported
 from ccxt.base.errors import DDoSProtection
 from ccxt.base.errors import ExchangeNotAvailable
 from ccxt.base.errors import InvalidNonce
@@ -116,6 +118,30 @@ class poloniex (Exchange):
                         'transferBalance',
                         'withdraw',
                     ],
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://api2.poloniex.com',
+                    },
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
             # Fees are tier-based. More info: https://poloniex.com/fees/
@@ -259,6 +285,7 @@ class poloniex (Exchange):
             })
             result.append(self.extend(self.fees['trading'], {
                 'id': id,
+                'id2': str(market['id']),
                 'symbol': symbol,
                 'baseId': baseId,
                 'quoteId': quoteId,
@@ -1208,3 +1235,276 @@ class poloniex (Exchange):
             if broadKey is not None:
                 raise broad[broadKey](feedback)
             raise ExchangeError(feedback)  # unknown message
+
+    def _websocket_generate_url_stream(self, events, options):
+        return options['url']
+
+    def _websocket_market_id(self, symbol):
+        return self.market_id(symbol).lower()
+
+    def _websocket_on_open(self, contextId, websocketOptions):
+        symbolIds = {}
+        self._contextSet(contextId, 'symbolids', symbolIds)
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        channelId = msg[0]
+        if channelId == 1000:
+            # account notification(beta)
+            print('notification')
+        elif channelId == 1002:
+            # ticker data
+            print('ticker')
+        elif channelId == 1003:
+            # 24 hour exchange volume
+            print('24 hour exchange volume')
+        elif channelId == 1010:
+            print(self.id + '._websocketOnMessage() heartbeat ' + data)
+        else:
+            # if channelId is not one of the above, check if it is a marketId
+            symbolsIds = self._contextGet(contextId, 'symbolids')
+            channelIdStr = str(channelId)
+            if channelIdStr in symbolsIds:
+                # both 'ob' and 'trade' are handled by the same execution branch
+                # as on poloniex they are part of the same endpoint
+                symbol = symbolsIds[channelIdStr]
+                self._websocket_handle_ob(contextId, symbol, msg)
+            else:
+                # Some error occured
+                self.emit('err', ExchangeError(self.id + '._websocketOnMessage() failed to get symbol for channelId: ' + channelIdStr))
+                self.websocketClose(contextId)
+
+    def _websocket_parse_trade(self, trade, symbol):
+        # Websocket trade format different than REST trade format
+        id = trade[1]
+        side = 'buy' if (trade[2] == 1) else 'sell'
+        price = float(trade[3])
+        amount = float(trade[4])
+        timestamp = trade[5] * 1000  # ms resolution
+        return {
+            'id': id,
+            'info': trade,
+            'timestamp': timestamp,
+            'datetime': self.iso8601(timestamp),
+            'symbol': symbol,
+            'type': None,
+            'side': side,
+            'price': price,
+            'amount': amount,
+        }
+
+    def _websocket_handle_ob(self, contextId, symbol, data):
+        # Poloniex calls self Price Aggregated Book
+        # channelId = data[0]
+        sequenceNumber = data[1]
+        if len(data) > 2:
+            orderbook = data[2]
+            # symbol = str(self.find_symbol(channelId))
+            # Check if self is the first response which contains full current orderbook
+            if orderbook[0][0] == 'i':
+                if not self._contextIsSubscribed(contextId, 'ob', symbol):
+                    return
+                symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+                # currencyPair = orderbook[0][1]['currencyPair']
+                fullOrderbook = orderbook[0][1]['orderBook']
+                asks = []
+                bids = []
+                keys = []
+                i = 0
+                keys = list(fullOrderbook[0].keys())
+                for i in range(0, len(keys)):
+                    asks.append([float(keys[i]), float(fullOrderbook[0][keys[i]])])
+                keys = list(fullOrderbook[1].keys())
+                for i in range(0, len(keys)):
+                    bids.append([float(keys[i]), float(fullOrderbook[1][keys[i]])])
+                fullOrderbook = {
+                    'asks': asks,
+                    'bids': bids,
+                    'isFrozen': 0,
+                    'seq': sequenceNumber,
+                }
+                # I decided not to push the initial orderbook to cache.
+                # This way is less consistent but I think it's easier.
+                fullOrderbook = self.parse_order_book(fullOrderbook)
+                fullOrderbook = self._cloneOrderBook(fullOrderbook, symbolData['limit'])
+                fullOrderbook['obLastSequenceNumber'] = sequenceNumber
+                symbolData['ob'] = fullOrderbook
+                self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+                self.emit('ob', symbol, symbolData['ob'])
+            else:
+                order = None
+                orderbookDelta = {
+                    'asks': [],
+                    'bids': [],
+                    'seq': sequenceNumber,
+                }
+                price = 0.0
+                amount = 0.0
+                i = 0
+                for i in range(0, len(orderbook)):
+                    order = orderbook[i]
+                    if order[0] == 'o':
+                        price = float(order[2])
+                        amount = float(order[3])
+                        if order[1] == 0:
+                            # sell order
+                            orderbookDelta['asks'].append([price, amount])
+                        elif order[1] == 1:
+                            # buy order
+                            orderbookDelta['bids'].append([price, amount])
+                        else:
+                            # error
+                            self.emit('err', ExchangeError(self.id + '._websocketHandleOb() unknown value in buy/sell field. Expected 0 or 1 but got: ' + order[1]))
+                            self.websocketClose(contextId)
+                            return
+                    elif order[0] == 't':
+                        # self is not an order but a trade
+                        if self._contextIsSubscribed(contextId, 'trade', symbol):
+                            trade = self._websocket_parse_trade(order, symbol)
+                            self.emit('trade', symbol, trade)
+                        else:
+                            print(self.id + '._websocketHandleOb() skipping trade.')
+                        continue
+                    else:
+                        # unknown value
+                        self.emit('err', ExchangeError(self.id + '._websocketHandleOb() unknown value in order/trade field. Expected \'o\' or \'t\' but got: ' + order[0]))
+                        self.websocketClose(contextId)
+                        return
+                if not self._contextIsSubscribed(contextId, 'ob', symbol):
+                    return
+                # Add to cache
+                orderbookDelta = self.parse_order_book(orderbookDelta)
+                symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+                if (symbolData['obDeltaCache']) is None:
+                    # This check is necessary because the obDeltaCache will be deleted on a call to fetchOrderBook()
+                    symbolData['obDeltaCache'] = {}  # make empty cache
+                    symbolData['obDeltaCacheSize'] = 0  # counting number of cached deltas
+                symbolData['obDeltaCacheSize'] += 1
+                sequenceNumberStr = str(sequenceNumber)
+                symbolData['obDeltaCache'][sequenceNumberStr] = orderbookDelta
+                # Schedule call to _websocketOrderBookDeltaCache()
+                self._websocket_handle_ob_delta_cache(contextId, symbol)
+                self.emit('ob', symbol, symbolData['ob'])
+
+    def _websocket_handle_ob_delta_cache(self, contextId, symbol):
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        # Handle out-of-order sequenceNumber
+        # To avoid a memory leak, we must put a maximum on the size of obDeltaCache.
+        # When self maximum is reached, we accept that we have lost some orderbook updates.
+        # In self case we must fetch a new orderbook.
+        # Alternatively, we could apply all cached deltas and keep going.
+        if symbolData['obDeltaCacheSize'] > symbolData['obDeltaCacheSizeMax']:
+            symbolData['ob'] = self.fetch_order_book(symbol, symbolData['limit'])
+            # del symbolData['obDeltaCache']
+            symbolData['obDeltaCache'] = None
+            symbolData['obDeltaCacheSize'] = 0
+            self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+            return
+        if symbolData['obDeltaCacheSize'] == 0:
+            self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+            return
+        # if the cache exists
+        # check if the next sequenceNumber is in the cache
+        fullOrderbook = symbolData['ob']
+        lastSequenceNumber = fullOrderbook['obLastSequenceNumber']
+        cachedSequenceNumber = lastSequenceNumber + 1
+        cachedSequenceNumberStr = str(cachedSequenceNumber)
+        orderbookDelta = symbolData['obDeltaCache'][cachedSequenceNumberStr]
+        continueBool = orderbookDelta is not None
+        # While loop is not transpiled properly
+        # while(continueBool) {
+        nkeys = symbolData['obDeltaCacheSize']
+        i = 0
+        for i in range(0, nkeys):
+            if not continueBool:
+                break
+            symbolData['obDeltaCache'][cachedSequenceNumberStr] = None
+            fullOrderbook = self.mergeOrderBookDelta(symbolData['ob'], orderbookDelta)
+            fullOrderbook = self._cloneOrderBook(fullOrderbook, symbolData['limit'])
+            fullOrderbook['obLastSequenceNumber'] = cachedSequenceNumber
+            symbolData['ob'] = fullOrderbook
+            cachedSequenceNumber += 1
+            orderbookDelta = symbolData['obDeltaCache'][cachedSequenceNumberStr]
+            continueBool = orderbookDelta is not None
+            symbolData['obDeltaCacheSize'] -= 1
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+
+    def _websocket_subscribe_ob(self, contextId, event, symbol, nonce, params={}):
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        symbolData['limit'] = self.safe_integer(params, 'limit', None)
+        symbolData['obDeltaCache'] = None
+        symbolData['obDeltaCacheSize'] = 0
+        symbolData['obDeltaCacheSizeMax'] = self.safe_integer(params, 'obDeltaCacheSizeMax', 10)
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+        # get symbol id2
+        # market = self.market_id(symbol)
+        if not self._contextIsSubscribed(contextId, 'trade', symbol):
+            market = self.find_market(symbol)
+            symbolsIds = self._contextGet(contextId, 'symbolids')
+            symbolsIds[market['id2']] = symbol
+            self._contextSet(contextId, 'symbolids', symbolsIds)
+            payload = {
+                'command': 'subscribe',
+                'channel': market['id'],
+            }
+            self.websocketSendJson(payload)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_subscribe_trade(self, contextId, event, symbol, nonce, params={}):
+        if not self._contextIsSubscribed(contextId, 'ob', symbol):
+            market = self.find_market(symbol)
+            symbolsIds = self._contextGet(contextId, 'symbolids')
+            symbolsIds[market['id2']] = symbol
+            self._contextSet(contextId, 'symbolids', symbolsIds)
+            payload = {
+                'command': 'subscribe',
+                'channel': market['id'],
+            }
+            self.websocketSendJson(payload)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event == 'ob':
+            self._websocket_subscribe_ob(contextId, event, symbol, nonce, params)
+        elif event == 'trade':
+            self._websocket_subscribe_trade(contextId, event, symbol, nonce, params)
+        else:
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+
+    def _websocket_unsubscribe_ob(self, conxid, event, symbol, nonce, params):
+        if not self._contextIsSubscribed(conxid, 'trade', symbol):
+            market = self.market_id(symbol)
+            payload = {
+                'command': 'unsubscribe',
+                'channel': market,
+            }
+            self.websocketSendJson(payload)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_unsubscribe_trade(self, conxid, event, symbol, nonce, params):
+        if not self._contextIsSubscribed(conxid, 'ob', symbol):
+            market = self.market_id(symbol)
+            payload = {
+                'command': 'unsubscribe',
+                'channel': market,
+            }
+            self.websocketSendJson(payload)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_unsubscribe(self, conxid, event, symbol, nonce, params):
+        if event == 'ob':
+            self._websocket_unsubscribe_ob(conxid, event, symbol, nonce, params)
+        elif event == 'trade':
+            self._websocket_unsubscribe_trade(conxid, event, symbol, nonce, params)
+        else:
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

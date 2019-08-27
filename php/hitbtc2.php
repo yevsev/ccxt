@@ -551,6 +551,23 @@ class hitbtc2 extends hitbtc {
                 '20002' => '\\ccxt\\OrderNotFound', // canceling non-existent order
                 '20001' => '\\ccxt\\InsufficientFunds',
             ),
+            'wsconf' => array (
+                'conx-tpls' => array (
+                    'default' => array (
+                        'type' => 'ws',
+                        'baseurl' => 'wss://api.hitbtc.com/api/2/ws',
+                    ),
+                ),
+                'events' => array (
+                    'ob' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                ),
+            ),
         ));
     }
 
@@ -1424,5 +1441,150 @@ class hitbtc2 extends hitbtc {
             }
             throw new ExchangeError ($feedback);
         }
+    }
+
+    public function _websocket_on_message ($contextId, $data) {
+        $msg = json_decode ($data, $as_associative_array = true);
+        // TODO => if ($msg->error) error handle
+        $method = $this->safe_string($msg, 'method');
+        if ($method !== null) {
+            if ($method === 'snapshotOrderbook') {
+                // $orderbook = $msg->params;
+                // :parse $orderbook
+                // var_dump('orderbook>>>', $orderbook);
+                $this->_websocket_handle_snapshot_orderbook ($contextId, $msg);
+            } else if ($method === 'updateOrderbook') {
+                // $orderbook = $msg->params;
+                // TODO:update $orderbook
+                // var_dump('update $orderbook>>>', $orderbook);
+                $this->_websocket_handle_update_orderbook ($contextId, $msg);
+            }
+        }
+    }
+
+    public function _websocket_handle_snapshot_orderbook ($contextId, $data) {
+        $timestamp = null;
+        $obdata = $this->safe_value($data, 'params');
+        $rawsymbol = $this->safe_value($obdata, 'symbol');
+        $market = $this->markets_by_id[$rawsymbol];
+        $symbol = $market['symbol'];
+        // :parse orderbook
+        $ob = $this->parse_order_book($obdata, $timestamp, 'bid', 'ask', 'price', 'size');
+        // var_dump('parsed',$ob);
+        $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        $symbolData['ob'] = $ob;
+        $symbolData['rawData'] = $obdata;
+        $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+        $this->emit ('ob', $symbol, $this->_cloneOrderBook ($symbolData['ob'], $symbolData['limit']));
+    }
+
+    public function _websocket_is_zero_size ($size) {
+        // hitbtc - their doc is really bad, how many 0 will it have?
+        return $size === '0' || $size === '0.0' || $size === '0.00' || $size === '0.000' || $size === '0.0000';
+    }
+
+    public function _websocket_update_order ($items, $updates) {
+        for ($j = 0; $j < count ($updates); $j++) {
+            $o = $updates[$j];
+            $removeItem = -1;
+            $addItem = true;
+            for ($i = 0; $i < count ($items); $i++) {
+                $item = $items[$i];
+                if ($o['price'] === $item['price']) {
+                    if ($this->_websocket_is_zero_size ($o['size'])) {
+                       $removeItem = $i;
+                    } else {
+                       $item['size'] = $o['size'];
+                    }
+                    $addItem = false;
+                }
+            }
+            if ($removeItem > -1) {
+               $items->splice ($removeItem,1);
+            }
+            if ($addItem) {
+               $items[] = $o;
+            }
+        } 
+        return $items;
+    }
+
+    public function _websocket_handle_update_orderbook ($contextId, $data) {
+        $timestamp = null;
+        $obdata = $this->safe_value($data, 'params');
+        $rawsymbol = $this->safe_value($obdata, 'symbol');
+        $market = $this->markets_by_id[$rawsymbol];
+        $symbol = $market['symbol'];
+        $symbolData = $this->_contextGetSymbolData (
+            $contextId,
+            'ob',
+            $symbol
+        );
+        // :get updated last raw $ob
+        $rawData = $symbolData['rawData'];
+        // var_dump('>>>>>>get last raw',$rawData);
+        // :update,remove size = 0,check sequence
+        $rawData['ask'] = $this->_websocket_update_order ($rawData['ask'], $obdata['ask']);
+        $rawData['bid'] = $this->_websocket_update_order ($rawData['bid'], $obdata['bid']);
+        // var_dump('updated raw',$rawData,$obdata);
+        // :parse orderbook
+        $ob = $this->parse_order_book($rawData, $timestamp, 'bid', 'ask', 'price', 'size');
+        // var_dump('parsed',$ob);
+        // :update last raw $ob
+        $symbolData['ob'] = $ob;
+        $symbolData['rawData'] = $rawData;
+        $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+        $this->emit ('ob', $symbol, $this->_cloneOrderBook ($symbolData['ob'], $symbolData['limit']));
+    }
+
+    public function _websocket_subscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob') {
+            throw new NotSupported ('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        $data = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+        // depth from 0 to 5
+        // see https://github.com/huobiapi/API_Docs/wiki/WS_api_reference#%E8%AE%A2%E9%98%85-market-depth-%E6%95%B0%E6%8D%AE-marketsymboldepthtype
+        $data['depth'] = $this->safe_integer($params, 'depth', '50');
+        $data['limit'] = $this->safe_integer($params, 'limit', 200);
+        // it is not limit
+        // $data['limit'] = $params['depth'];
+        $this->_contextSetSymbolData ($contextId, $event, $symbol, $data);
+        $rawsymbol = $this->market_id($symbol);
+        $sendJson = array (
+            'method' => 'subscribeOrderbook',
+            'params' => array (
+                'symbol' => $rawsymbol,
+            ),
+            'id' => $rawsymbol,
+        );
+        $this->websocketSendJson ($sendJson);
+        $nonceStr = (string) $nonce;
+        $this->emit ($nonceStr, true);
+    }
+
+    public function _websocket_unsubscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob') {
+            throw new NotSupported ('unsubscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        $params['depth'] = $params['depth'] || '50';
+        $rawsymbol = $this->market_id($symbol);
+        $sendJson = array (
+            'method' => 'unsubscribeOrderbook',
+            'params' => array (
+                'symbol' => $rawsymbol,
+            ),
+            'id' => $rawsymbol,
+        );
+        $this->websocketSendJson ($sendJson);
+        $nonceStr = (string) $nonce;
+        $this->emit ($nonceStr, true);
+    }
+
+    public function _get_current_websocket_orderbook ($contextId, $symbol, $limit) {
+        $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if (is_array ($data && $data['ob'] !== null) && array_key_exists ('ob', $data && $data['ob'] !== null)) {
+            return $this->_cloneOrderBook ($data['ob'], $limit);
+        }
+        return null;
     }
 }
