@@ -34,9 +34,9 @@ use React;
 use Clue;
 
 //require __DIR__.'/../vendor/autoload.php';
-require_once 'php/websocket/WebsocketConnection.php';
-require_once 'php/websocket/PusherLightConnection.php';
-require_once 'php/websocket/SocketIoLightConnection.php';
+require_once __DIR__.'/websocket/WebsocketConnection.php';
+require_once __DIR__.'/websocket/PusherLightConnection.php';
+require_once __DIR__.'/websocket/SocketIoLightConnection.php';
 
 use kornrunner\Eth;
 use kornrunner\Secp256k1;
