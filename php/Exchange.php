@@ -33,7 +33,7 @@ namespace ccxt;
 use React;
 use Clue;
 
-require __DIR__.'/../vendor/autoload.php';
+//require __DIR__.'/../vendor/autoload.php';
 require_once 'php/websocket/WebsocketConnection.php';
 require_once 'php/websocket/PusherLightConnection.php';
 require_once 'php/websocket/SocketIoLightConnection.php';
