@@ -5,7 +5,7 @@ use React;
 use Ratchet;
 use Clue;
 
-require __DIR__ . '/../../vendor/autoload.php';
+//require __DIR__ . '/../../vendor/autoload.php';
 
 require_once 'WebsocketBaseConnection.php';
 
