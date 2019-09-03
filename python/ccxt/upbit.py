@@ -5,6 +5,7 @@
 
 from ccxt.base.exchange import Exchange
 import math
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import PermissionDenied
@@ -12,6 +13,7 @@ from ccxt.base.errors import BadRequest
 from ccxt.base.errors import InsufficientFunds
 from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import OrderNotFound
+from ccxt.base.errors import NotSupported
 
 
 class upbit (Exchange):
@@ -28,7 +30,7 @@ class upbit (Exchange):
             'has': {
                 'CORS': True,
                 'createDepositAddress': True,
-                'createMarketOrder': False,
+                'createMarketOrder': True,
                 'fetchDepositAddress': True,
                 'fetchClosedOrders': True,
                 'fetchMyTrades': False,
@@ -132,18 +134,55 @@ class upbit (Exchange):
                     'thirdparty_agreement_required': PermissionDenied,
                     'out_of_scope': PermissionDenied,
                     'order_not_found': OrderNotFound,
-                    'insufficient_funds_ask': InsufficientFunds,
-                    'insufficient_funds_bid': InsufficientFunds,
+                    'insufficient_funds': InsufficientFunds,
                     'invalid_access_key': AuthenticationError,
                     'jwt_verification': AuthenticationError,
+                    'create_ask_error': ExchangeError,
+                    'create_bid_error': ExchangeError,
+                    'volume_too_large': InvalidOrder,
+                    'invalid_funds': InvalidOrder,
                 },
             },
             'options': {
+                'createMarketBuyOrderRequiresPrice': True,
                 'fetchTickersMaxLength': 4096,  # 2048,
                 'fetchOrderBooksMaxLength': 4096,  # 2048,
                 'symbolSeparator': '-',
                 'tradingFeesByQuoteCurrency': {
                     'KRW': 0.0005,
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://crix-websocket-sg.upbit.com/sockjs/websocket',
+                        'baseurl2': 'wss://crix-ws.upbit.com/websocket',
+                        'baseurl3': 'wss://api.upbit.com/websocket/v1',
+                    },
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'ticker': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
             'commonCurrencies': {
@@ -229,7 +268,7 @@ class upbit (Exchange):
             maxWithdrawLimit = maxDailyWithdrawal
         precision = None
         currencyId = self.safe_string(currencyInfo, 'code')
-        code = self.common_currency_code(currencyId)
+        code = self.safe_currency_code(currencyId)
         return {
             'info': response,
             'id': currencyId,
@@ -292,8 +331,8 @@ class upbit (Exchange):
         marketId = self.safe_string(marketInfo, 'id')
         baseId = self.safe_string(ask, 'currency')
         quoteId = self.safe_string(bid, 'currency')
-        base = self.common_currency_code(baseId)
-        quote = self.common_currency_code(quoteId)
+        base = self.safe_currency_code(baseId)
+        quote = self.safe_currency_code(quoteId)
         symbol = base + '/' + quote
         precision = {
             'amount': 8,
@@ -357,8 +396,8 @@ class upbit (Exchange):
             market = response[i]
             id = self.safe_string(market, 'market')
             quoteId, baseId = id.split('-')
-            base = self.common_currency_code(baseId)
-            quote = self.common_currency_code(quoteId)
+            base = self.safe_currency_code(baseId)
+            quote = self.safe_currency_code(quoteId)
             symbol = base + '/' + quote
             precision = {
                 'amount': 8,
@@ -412,20 +451,14 @@ class upbit (Exchange):
         #                  modified:  False    }   ]
         #
         result = {'info': response}
-        indexed = self.index_by(response, 'currency')
-        ids = list(indexed.keys())
-        for i in range(0, len(ids)):
-            id = ids[i]
-            currency = self.common_currency_code(id)
+        for i in range(0, len(response)):
+            balance = response[i]
+            currencyId = self.safe_string(balance, 'currency')
+            code = self.safe_currency_code(currencyId)
             account = self.account()
-            balance = indexed[id]
-            free = self.safe_float(balance, 'balance')
-            used = self.safe_float(balance, 'locked')
-            total = self.sum(free, used)
-            account['free'] = free
-            account['used'] = used
-            account['total'] = total
-            result[currency] = account
+            account['free'] = self.safe_float(balance, 'balance')
+            account['used'] = self.safe_float(balance, 'locked')
+            result[code] = account
         return self.parse_balance(result)
 
     def get_symbol_from_market_id(self, marketId, market=None):
@@ -435,8 +468,8 @@ class upbit (Exchange):
         if market is not None:
             return market['symbol']
         baseId, quoteId = marketId.split(self.options['symbolSeparator'])
-        base = self.common_currency_code(baseId)
-        quote = self.common_currency_code(quoteId)
+        base = self.safe_currency_code(baseId)
+        quote = self.safe_currency_code(quoteId)
         return base + '/' + quote
 
     def fetch_order_books(self, symbols=None, params={}):
@@ -629,7 +662,7 @@ class upbit (Exchange):
         #                    ask_bid: "ASK",
         #              sequential_id:  15428949259430000}
         #
-        # fetchOrder
+        # fetchOrder trades
         #
         #         {
         #             "market": "KRW-BTC",
@@ -649,9 +682,7 @@ class upbit (Exchange):
         if timestamp is None:
             timestamp = self.parse8601(self.safe_string(trade, 'created_at'))
         side = None
-        askOrBid = self.safe_string_2(trade, 'ask_bid', 'side')
-        if askOrBid is not None:
-            askOrBid = askOrBid.lower()
+        askOrBid = self.safe_string_lower_2(trade, 'ask_bid', 'side')
         if askOrBid == 'ask':
             side = 'sell'
         elif askOrBid == 'bid':
@@ -673,8 +704,8 @@ class upbit (Exchange):
             feeCurrency = market['quote']
         else:
             baseId, quoteId = marketId.split('-')
-            base = self.common_currency_code(baseId)
-            quote = self.common_currency_code(quoteId)
+            base = self.safe_currency_code(baseId)
+            quote = self.safe_currency_code(quoteId)
             symbol = base + '/' + quote
             feeCurrency = quote
         feeCost = self.safe_string(trade, askOrBid + '_fee')
@@ -692,6 +723,7 @@ class upbit (Exchange):
             'symbol': symbol,
             'type': 'limit',
             'side': side,
+            'takerOrMaker': None,
             'price': price,
             'amount': amount,
             'cost': cost,
@@ -772,6 +804,9 @@ class upbit (Exchange):
             numMinutes = int(round(timeframePeriod / 60))
             request['unit'] = numMinutes
             method += 'Unit'
+        if since is not None:
+            # convert `since` to `to` value
+            request['to'] = self.iso8601(self.sum(since, timeframePeriod * limit * 1000))
         response = getattr(self, method)(self.extend(request, params))
         #
         #     [{                 market: "BTC-ETH",
@@ -800,8 +835,14 @@ class upbit (Exchange):
         return self.parse_ohlcvs(response, market, timeframe, since, limit)
 
     def create_order(self, symbol, type, side, amount, price=None, params={}):
-        if type != 'limit':
-            raise InvalidOrder(self.id + ' createOrder allows limit orders onlynot ')
+        if type == 'market':
+            # for market buy it requires the amount of quote currency to spend
+            if side == 'buy':
+                if self.options['createMarketBuyOrderRequiresPrice']:
+                    if price is None:
+                        raise InvalidOrder(self.id + " createOrder() requires the price argument with market buy orders to calculate total order cost(amount to spend), where cost = amount * price. Supply a price argument to createOrder() call if you want the cost to be calculated for you from price and amount, or, alternatively, add .options['createMarketBuyOrderRequiresPrice'] = False to supply the cost in the amount argument(the exchange-specific behaviour)")
+                    else:
+                        amount = amount * price
         orderSide = None
         if side == 'buy':
             orderSide = 'bid'
@@ -814,10 +855,18 @@ class upbit (Exchange):
         request = {
             'market': market['id'],
             'side': orderSide,
-            'volume': self.amount_to_precision(symbol, amount),
-            'price': self.price_to_precision(symbol, price),
-            'ord_type': type,
         }
+        if type == 'limit':
+            request['volume'] = self.amount_to_precision(symbol, amount)
+            request['price'] = self.price_to_precision(symbol, price)
+            request['ord_type'] = type
+        elif type == 'market':
+            if side == 'buy':
+                request['ord_type'] = 'price'
+                request['price'] = self.price_to_precision(symbol, amount)
+            elif side == 'sell':
+                request['ord_type'] = type
+                request['volume'] = self.amount_to_precision(symbol, amount)
         response = self.privatePostOrders(self.extend(request, params))
         #
         #     {
@@ -986,13 +1035,8 @@ class upbit (Exchange):
         type = self.safe_string(transaction, 'type')
         if type == 'withdraw':
             type = 'withdrawal'
-        code = None
         currencyId = self.safe_string(transaction, 'currency')
-        currency = self.safe_value(self.currencies_by_id, currencyId)
-        if currency is not None:
-            code = currency['code']
-        else:
-            code = self.common_currency_code(currencyId)
+        code = self.safe_currency_code(currencyId)
         status = self.parse_transaction_status(self.safe_string(transaction, 'state'))
         feeCost = self.safe_float(transaction, 'fee')
         return {
@@ -1058,9 +1102,9 @@ class upbit (Exchange):
         #                 "price": "101000.0",
         #                 "volume": "0.22631677",
         #                 "funds": "22857.99377",
-        #                 "ask_fee": "34.286990655",
-        #                 "bid_fee": "34.286990655",
-        #                 "created_at": "2018-04-05T14:09:15+09:00",
+        #                 "ask_fee": "34.286990655",  # missing in market orders
+        #                 "bid_fee": "34.286990655",  # missing in market orders
+        #                 "created_at": "2018-04-05T14:09:15+09:00",  # missing in market orders
         #                 "side": "bid",
         #             },
         #         ],
@@ -1081,14 +1125,11 @@ class upbit (Exchange):
         remaining = self.safe_float(order, 'remaining_volume')
         filled = self.safe_float(order, 'executed_volume')
         cost = None
-        average = price  # they support limit orders only for now
-        if cost is None:
-            if (price is not None) and(filled is not None):
-                cost = price * filled
-        orderTrades = self.safe_value(order, 'trades')
-        trades = None
-        if orderTrades is not None:
-            trades = self.parse_trades(orderTrades)
+        if type == 'price':
+            type = 'market'
+            cost = price
+            price = None
+        average = None
         fee = None
         feeCost = self.safe_float(order, 'paid_fee')
         feeCurrency = None
@@ -1100,23 +1141,30 @@ class upbit (Exchange):
             feeCurrency = market['quote']
         else:
             baseId, quoteId = marketId.split('-')
-            base = self.common_currency_code(baseId)
-            quote = self.common_currency_code(quoteId)
+            base = self.safe_currency_code(baseId)
+            quote = self.safe_currency_code(quoteId)
             symbol = base + '/' + quote
             feeCurrency = quote
-        if trades is not None:
-            numTrades = len(trades)
-            if numTrades > 0:
-                if lastTradeTimestamp is None:
-                    lastTradeTimestamp = trades[numTrades - 1]['timestamp']
-                if feeCost is None:
-                    for i in range(0, numTrades):
-                        tradeFee = self.safe_value(trades[i], 'fee', {})
-                        tradeFeeCost = self.safe_float(tradeFee, 'cost')
-                        if tradeFeeCost is not None:
-                            if feeCost is None:
-                                feeCost = 0
-                            feeCost = self.sum(feeCost, tradeFeeCost)
+        trades = self.safe_value(order, 'trades', [])
+        trades = self.parse_trades(trades, market, None, None, {'order': id})
+        numTrades = len(trades)
+        if numTrades > 0:
+            # the timestamp in fetchOrder trades is missing
+            lastTradeTimestamp = trades[numTrades - 1]['timestamp']
+            getFeesFromTrades = False
+            if feeCost is None:
+                getFeesFromTrades = True
+                feeCost = 0
+            cost = 0
+            for i in range(0, numTrades):
+                trade = trades[i]
+                cost = self.sum(cost, trade['cost'])
+                if getFeesFromTrades:
+                    tradeFee = self.safe_value(trades[i], 'fee', {})
+                    tradeFeeCost = self.safe_float(tradeFee, 'cost')
+                    if tradeFeeCost is not None:
+                        feeCost = self.sum(feeCost, tradeFeeCost)
+            average = cost / filled
         if feeCost is not None:
             fee = {
                 'currency': feeCurrency,
@@ -1279,7 +1327,8 @@ class upbit (Exchange):
         #
         address = self.safe_string(depositAddress, 'deposit_address')
         tag = self.safe_string(depositAddress, 'secondary_address')
-        code = self.common_currency_code(self.safe_string(depositAddress, 'currency'))
+        currencyId = self.safe_string(depositAddress, 'currency')
+        code = self.safe_currency_code(currencyId)
         self.check_address(address)
         return {
             'currency': code,
@@ -1386,7 +1435,7 @@ class upbit (Exchange):
             }
             if query:
                 request['query'] = self.urlencode(query)
-            jwt = self.jwt(request, self.secret)
+            jwt = self.jwt(request, self.encode(self.secret))
             headers = {
                 'Authorization': 'Bearer ' + jwt,
             }
@@ -1395,7 +1444,7 @@ class upbit (Exchange):
                 headers['Content-Type'] = 'application/json'
         return {'url': url, 'method': method, 'body': body, 'headers': headers}
 
-    def handle_errors(self, httpCode, reason, url, method, headers, body, response):
+    def handle_errors(self, httpCode, reason, url, method, headers, body, response, requestHeaders, requestBody):
         if response is None:
             return  # fallback to default error handler
         #
@@ -1427,3 +1476,179 @@ class upbit (Exchange):
             if broadKey is not None:
                 raise broad[broadKey](feedback)
             raise ExchangeError(feedback)  # unknown message
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        # console.log(msg)
+        type = self.safe_string(msg, 'type')
+        code = self.safe_string(msg, 'code')
+        # streamType = self.safe_string(msg, 'streamType')
+        id = code.replace('CRIX.UPBIT.', '')
+        type = type.replace('crix', '')
+        type = type.lower()
+        symbol = self.find_symbol(id)
+        if type == 'orderbook':
+            self._websocket_handle_order_book(contextId, symbol, msg)
+        elif type == 'trade':
+            self._websocket_handle_trade(contextId, symbol, msg)
+        elif type == 'ticker':
+            self._websocket_handle_ticker(contextId, symbol, msg)
+
+    def _websocket_handle_order_book(self, contextId, symbol, msg):
+        obUnits = self.safe_value(msg, 'orderbook_units', [])
+        timestamp = self.safe_float(msg, 'timestamp')
+        ob = {
+            'bids': [],
+            'asks': [],
+            'timestamp': timestamp,
+            'datetime': self.iso8601(timestamp),
+            'nonce': None,
+        }
+        for i in range(0, len(obUnits)):
+            obUnit = obUnits[i]
+            bidPrice = self.safe_float(obUnit, 'bid_price')
+            bidSize = self.safe_float(obUnit, 'bid_size')
+            askPrice = self.safe_float(obUnit, 'ask_price')
+            askSize = self.safe_float(obUnit, 'ask_size')
+            self.updateBidAsk([bidPrice, bidSize], ob['bids'], True)
+            self.updateBidAsk([askPrice, askSize], ob['asks'], False)
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        symbolData['ob'] = ob
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+        self.emit('ob', symbol, self._cloneOrderBook(symbolData['ob'], symbolData['limit']))
+
+    def _websocket_handle_ticker(self, contextId, symbol, msg):
+        #  {"type":"ticker","code":"BTC-ETH","opening_price":0.02601664,"high_price":0.02615611,"low_price":0.02587020,"trade_price":0.02599133,"prev_closing_price":0.02602994,"acc_trade_price":142.52289604,"change":"FALL","change_price":0.00003861,"signed_change_price":-0.00003861,"change_rate":0.0014832919,"signed_change_rate":-0.0014832919,"ask_bid":"ASK","trade_volume":39.09714085,"acc_trade_volume":5470.69961159,"trade_date":"20181215","trade_time":"153346","trade_timestamp":1544888026830,"acc_ask_volume":2350.63591821,"acc_bid_volume":3120.06369338,"highest_52_week_price":0.12345678,"highest_52_week_date":"2018-02-01","lowest_52_week_price":0.02460824,"lowest_52_week_date":"2018-12-07","trade_status":null,"market_state":"ACTIVE","market_state_for_ios":null,"is_trading_suspended":false,"delisting_date":null,"market_warning":"NONE","timestamp":1544888027872,"acc_trade_price_24h":null,"acc_trade_volume_24h":null,"stream_type":"SNAPSHOT"}
+        timestamp = self.safe_integer(msg, 'trade_timestamp')
+        previous = self.safe_float(msg, 'prev_closing_price')
+        last = self.safe_float(msg, 'trade_price')
+        change = self.safe_float(msg, 'signed_change_price')
+        percentage = self.safe_float(msg, 'signed_change_rate')
+        t = {
+            'symbol': symbol,
+            'timestamp': timestamp,
+            'datetime': self.iso8601(timestamp),
+            'high': self.safe_float(msg, 'high_price'),
+            'low': self.safe_float(msg, 'low_price'),
+            'bid': None,
+            'bidVolume': None,
+            'ask': None,
+            'askVolume': None,
+            'vwap': None,
+            'open': self.safe_float(msg, 'opening_price'),
+            'close': last,
+            'last': last,
+            'previousClose': previous,
+            'change': change,
+            'percentage': percentage,
+            'average': None,
+            'baseVolume': self.safe_float(msg, 'acc_trade_volume_24h'),
+            'quoteVolume': self.safe_float(msg, 'acc_trade_price_24h'),
+            'info': msg,
+        }
+        self.emit('ticker', symbol, t)
+
+    def _websocket_handle_trade(self, contextId, symbol, msg):
+        # {"prevClosingPrice":0.02602994,"change":"RISE","changePrice":0.00005434,,"type":"crixTrade","code":"CRIX.UPBIT.BTC-ETH",,"streamType":"SNAPSHOT"}
+        id = self.safe_string(msg, 'sequential_id')
+        orderId = None
+        timestamp = self.safe_integer(msg, 'trade_timestamp')
+        side = None
+        askOrBid = self.safe_string(msg, 'ask_bid')
+        if askOrBid is not None:
+            askOrBid = askOrBid.lower()
+        if askOrBid == 'ask':
+            side = 'sell'
+        elif askOrBid == 'bid':
+            side = 'buy'
+        cost = None
+        price = self.safe_float(msg, 'trade_price')
+        amount = self.safe_float(msg, 'trade_volume')
+        if amount is not None:
+            if price is not None:
+                cost = price * amount
+        trade = {
+            'id': id,
+            'info': msg,
+            'order': orderId,
+            'timestamp': timestamp,
+            'datetime': self.iso8601(timestamp),
+            'symbol': symbol,
+            'type': 'limit',
+            'side': side,
+            'price': price,
+            'amount': amount,
+            'cost': cost,
+            'fee': None,
+        }
+        self.emit('trade', symbol, [trade])
+
+    def _websocket_generate_ticket(self, contextId, sEvent, sSymbol, subscribe):
+        ticket = [
+            {
+                'ticket': 'ram macbook',
+            },
+            {
+                'format': 'DEFAULT',
+            },
+        ]
+        eventCodes = {}
+        subscribedEvents = self._websocketContextGetSubscribedEventSymbols(contextId)
+        for i in range(0, len(subscribedEvents)):
+            subscribedEvent = subscribedEvents[i]
+            event = subscribedEvent['event']
+            symbol = subscribedEvent['symbol']
+            if subscribe or (event != sEvent) and(symbol != sSymbol):
+                # id = 'CRIX.UPBIT.' + self.market_id(symbol)
+                id = self.market_id(symbol)
+                if event in eventCodes:
+                    eventCodes[event].append(id)
+                else:
+                    eventCodes[event] = [id]
+        events = list(eventCodes.keys())
+        for j in range(0, len(events)):
+            event = events[j]
+            if event == 'ob':
+                ticket.append({
+                    'type': 'orderbook',
+                    'codes': eventCodes[event],
+                })
+            elif event == 'trade':
+                ticket.append({
+                    'type': 'trade',
+                    'codes': eventCodes[event],
+                })
+            elif event == 'ticker':
+                ticket.append({
+                    'type': 'ticker',
+                    'codes': eventCodes[event],
+                })
+        return ticket
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if (event != 'ob') and(event != 'ticker') and(event != 'trade'):
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        # save nonce for subscription response
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        payload = self._websocket_generate_ticket(contextId, event, symbol, True)
+        if event == 'ob':
+            symbolData['limit'] = self.safe_integer(params, 'limit', None)
+        self._contextSetSymbolData(contextId, event, symbol, symbolData)
+        # send request
+        self.websocketSendJson(payload)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        if (event != 'ob') and(event != 'ticker') and(event != 'trade'):
+            raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        payload = self._websocket_generate_ticket(contextId, event, symbol, False)
+        nonceStr = str(nonce)
+        self.websocketSendJson(payload)
+        self.emit(nonceStr, True)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

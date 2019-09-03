@@ -13,6 +13,7 @@ except NameError:
     basestring = str  # Python 2
 import hashlib
 import math
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import ArgumentsRequired
@@ -36,7 +37,6 @@ class theocean (Exchange):
             'countries': ['US'],
             'rateLimit': 3000,
             'version': 'v1',
-            'certified': True,
             'requiresWeb3': True,
             'timeframes': {
                 '5m': '300',
@@ -112,10 +112,30 @@ class theocean (Exchange):
                 'decimals': {},
                 'fetchOrderMethod': 'fetch_order_from_history',
             },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws-io',
+                        'baseurl': 'wss://ws.theocean.trade/socket.io/?EIO=3&transport=websocket',
+                    },
+                },
+                'methodmap': {
+                    '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
+            },
         })
 
     def fetch_markets(self, params={}):
-        markets = self.publicGetTokenPairs()
+        markets = self.publicGetTokenPairs(params)
         #
         #     [
         #       "baseToken": {
@@ -141,14 +161,12 @@ class theocean (Exchange):
         result = []
         for i in range(0, len(markets)):
             market = markets[i]
-            baseToken = market['baseToken']
-            quoteToken = market['quoteToken']
-            baseId = baseToken['address']
-            quoteId = quoteToken['address']
-            base = baseToken['symbol']
-            quote = quoteToken['symbol']
-            base = self.common_currency_code(base)
-            quote = self.common_currency_code(quote)
+            baseToken = self.safe_value(market, 'baseToken', {})
+            quoteToken = self.safe_value(market, 'quoteToken', {})
+            baseId = self.safe_string(baseToken, 'address')
+            quoteId = self.safe_string(quoteToken, 'address')
+            base = self.safe_currency_code(self.safe_string(baseToken, 'symbol'))
+            quote = self.safe_currency_code(self.safe_string(quoteToken, 'symbol'))
             symbol = base + '/' + quote
             id = baseId + '/' + quoteId
             baseDecimals = self.safe_integer(baseToken, 'decimals')
@@ -194,7 +212,7 @@ class theocean (Exchange):
     def parse_ohlcv(self, ohlcv, market=None, timeframe='5m', since=None, limit=None):
         baseDecimals = self.safe_integer(self.options['decimals'], market['base'], 18)
         return [
-            self.safe_integer(ohlcv, 'startTime') * 1000,
+            self.safe_timestamp(ohlcv, 'startTime'),
             self.safe_float(ohlcv, 'open'),
             self.safe_float(ohlcv, 'high'),
             self.safe_float(ohlcv, 'low'),
@@ -440,6 +458,8 @@ class theocean (Exchange):
         #         timestamp: "1532261686"                                                          }
         #
         timestamp = self.safe_integer(trade, 'lastUpdated')
+        if timestamp is not None:
+            timestamp /= 1000
         price = self.safe_float(trade, 'price')
         id = self.safe_string(trade, 'id')
         side = self.safe_string(trade, 'side')
@@ -696,9 +716,10 @@ class theocean (Exchange):
         return getattr(self, method)(id, symbol, self.extend(params))
 
     def fetch_order_from_history(self, id, symbol=None, params={}):
-        orders = self.fetch_orders(symbol, None, None, self.extend({
+        request = {
             'orderHash': id,
-        }, params))
+        }
+        orders = self.fetch_orders(symbol, None, None, self.extend(request, params))
         ordersById = self.index_by(orders, 'id')
         if id in ordersById:
             return ordersById[id]
@@ -788,14 +809,16 @@ class theocean (Exchange):
         return self.parse_orders(response, None, since, limit)
 
     def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
-        return self.fetch_orders(symbol, since, limit, self.extend({
+        request = {
             'openAmount': 1,  # returns open orders with remaining openAmount >= 1
-        }, params))
+        }
+        return self.fetch_orders(symbol, since, limit, self.extend(request, params))
 
     def fetch_closed_orders(self, symbol=None, since=None, limit=None, params={}):
-        return self.fetch_orders(symbol, since, limit, self.extend({
+        request = {
             'openAmount': 0,  # returns closed orders with remaining openAmount == 0
-        }, params))
+        }
+        return self.fetch_orders(symbol, since, limit, self.extend(request, params))
 
     def sign(self, path, api='public', method='GET', params={}, headers=None, body=None):
         url = self.urls['api'] + '/' + self.version + '/' + self.implode_params(path, params)
@@ -823,10 +846,8 @@ class theocean (Exchange):
                 url += '?' + self.urlencode(query)
         return {'url': url, 'method': method, 'body': body, 'headers': headers}
 
-    def handle_errors(self, httpCode, reason, url, method, headers, body, response):
-        if not isinstance(body, basestring):
-            return  # fallback to default error handler
-        if len(body) < 2:
+    def handle_errors(self, httpCode, reason, url, method, headers, body, response, requestHeaders, requestBody):
+        if response is None:
             return  # fallback to default error handler
         # code 401 and plain body 'Authentication failed'(with single quotes)
         # self error is sent if you do not submit a proper Content-Type
@@ -853,3 +874,120 @@ class theocean (Exchange):
                 if broadKey is not None:
                     raise broad[broadKey](feedback)
                 raise ExchangeError(feedback)  # unknown message
+
+    def request(self, path, api='public', method='GET', params={}, headers=None, body=None):
+        response = self.fetch2(path, api, method, params, headers, body)
+        if not isinstance(response, basestring):
+            raise ExchangeError(self.id + ' returned a non-string response: ' + str(response))
+        if (response[0] == '{' or response[0] == '['):
+            return json.loads(response)
+        return response
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        evtData = msg[1]
+        type = self.safe_string(evtData, 'type')
+        channel = self.safe_string(evtData, 'channel')
+        if channel == 'order_book':
+            if type == 'snapshot':
+                self._websocket_handle_ob_snapshot(contextId, evtData)
+            elif type == 'update':
+                self._websocket_handle_ob_update(contextId, evtData)
+
+    def _websocket_get_symbol_from(self, baseId, quoteId):
+        marketId = baseId + '/' + quoteId
+        market = None
+        if marketId in self.markets_by_id:
+            market = self.markets_by_id[marketId]
+            return market['symbol']
+        return marketId
+
+    def _websocket_handle_ob_snapshot(self, contextId, msg):
+        channelId = self.safe_string(msg, 'channelId')
+        parts = channelId.split('_')
+        baseId = parts[2]
+        quoteId = parts[3]
+        symbol = self._websocket_get_symbol_from(baseId, quoteId)
+        self._websocket_handle_subscription(contextId, 'ob', symbol)
+        payload = self.safe_value(msg, 'payload')
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        market = self.market(symbol)
+        ob = self.parse_order_book(payload, None, 'bids', 'asks', 'price', 'availableAmount', market)
+        symbolData['ob'] = ob
+        self.emit('ob', symbol, self._cloneOrderBook(ob, symbolData['limit']))
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+
+    def _websocket_handle_ob_update(self, contextId, msg):
+        channelId = self.safe_string(msg, 'channelId')
+        parts = channelId.split('_')
+        baseId = parts[2]
+        quoteId = parts[3]
+        symbol = self._websocket_get_symbol_from(baseId, quoteId)
+        payload = self.safe_value(msg, 'payload')
+        market = self.market(symbol)
+        obUpdate = self.parse_order_book(payload, None, 'bids', 'asks', 'price', 'availableAmount', market)
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        ob = symbolData['ob']
+        for i in range(0, len(obUpdate['bids'])):
+            self.updateBidAsk(obUpdate['bids'][i], ob['bids'], True)
+        for i in range(0, len(obUpdate['asks'])):
+            self.updateBidAsk(obUpdate['asks'][i], ob['asks'], False)
+        symbolData['ob'] = ob
+        self.emit('ob', symbol, self._cloneOrderBook(ob, symbolData['limit']))
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+
+    def _websocket_handle_subscription(self, contextId, event, symbol):
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if 'sub-nonces' in symbolData:
+            nonces = symbolData['sub-nonces']
+            keys = list(nonces.keys())
+            for i in range(0, len(keys)):
+                nonce = keys[i]
+                self._cancelTimeout(nonces[nonce])
+                self.emit(nonce, True)
+            symbolData['sub-nonces'] = {}
+            self._contextSetSymbolData(contextId, event, symbol, symbolData)
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        # save nonce for subscription response
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if not('sub-nonces' in list(symbolData.keys())):
+            symbolData['sub-nonces'] = {}
+        symbolData['limit'] = self.safe_integer(params, 'limit', None)
+        nonceStr = str(nonce)
+        handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce'])
+        symbolData['sub-nonces'][nonceStr] = handle
+        self._contextSetSymbolData(contextId, event, symbol, symbolData)
+        # send request
+        market = self.market(symbol)
+        self.websocketSendJson([
+            'data', {
+                'type': 'subscribe',
+                'channel': 'order_book',
+                'payload': {
+                    'baseTokenAddress': market['baseId'],
+                    'quoteTokenAddress': market['quoteId'],
+                    'snapshot': 'true',
+                    'depth': self.safe_string(params, 'depth', '100'),
+                },
+            },
+        ])
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+
+    def _websocket_timeout_remove_nonce(self, contextId, timerNonce, event, symbol, key):
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if key in symbolData:
+            nonces = symbolData[key]
+            if timerNonce in nonces:
+                self.omit(symbolData[key], timerNonce)
+                self._contextSetSymbolData(contextId, event, symbol, symbolData)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

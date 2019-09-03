@@ -4,6 +4,7 @@
 # https://github.com/ccxt/ccxt/blob/master/CONTRIBUTING.md#how-to-contribute-code
 
 from ccxt.base.exchange import Exchange
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import NotSupported
 
@@ -74,6 +75,23 @@ class coincheck (Exchange):
                     ],
                 },
             },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://ws-api.coincheck.com/',
+                    },
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
+            },
             'markets': {
                 'BTC/JPY': {'id': 'btc_jpy', 'symbol': 'BTC/JPY', 'base': 'BTC', 'quote': 'JPY', 'baseId': 'btc', 'quoteId': 'jpy'},  # the only real pair
                 # 'ETH/JPY': {'id': 'eth_jpy', 'symbol': 'ETH/JPY', 'base': 'ETH', 'quote': 'JPY', 'baseId': 'eth', 'quoteId': 'jpy'},
@@ -111,23 +129,23 @@ class coincheck (Exchange):
         })
 
     def fetch_balance(self, params={}):
-        balances = self.privateGetAccountsBalance()
+        self.load_markets()
+        balances = self.privateGetAccountsBalance(params)
         result = {'info': balances}
-        currencies = list(self.currencies.keys())
-        for i in range(0, len(currencies)):
-            currency = currencies[i]
-            lowercase = currency.lower()
-            account = self.account()
-            if lowercase in balances:
-                account['free'] = float(balances[lowercase])
-            reserved = lowercase + '_reserved'
-            if reserved in balances:
-                account['used'] = float(balances[reserved])
-            account['total'] = self.sum(account['free'], account['used'])
-            result[currency] = account
+        codes = list(self.currencies.keys())
+        for i in range(0, len(codes)):
+            code = codes[i]
+            currencyId = self.currencyId(code)
+            if currencyId in balances:
+                account = self.account()
+                reserved = currencyId + '_reserved'
+                account['free'] = self.safe_float(balances, currencyId)
+                account['used'] = self.safe_float(balances, reserved)
+                result[code] = account
         return self.parse_balance(result)
 
     def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
+        self.load_markets()
         # Only BTC/JPY is meaningful
         market = None
         if symbol is not None:
@@ -177,8 +195,8 @@ class coincheck (Exchange):
                 symbol = market['symbol']
             else:
                 baseId, quoteId = marketId.split('_')
-                base = self.common_currency_code(baseId)
-                quote = self.common_currency_code(quoteId)
+                base = self.safe_currency_code(baseId)
+                quote = self.safe_currency_code(quoteId)
                 symbol = base + '/' + quote
         return {
             'id': id,
@@ -201,14 +219,16 @@ class coincheck (Exchange):
     def fetch_order_book(self, symbol, limit=None, params={}):
         if symbol != 'BTC/JPY':
             raise NotSupported(self.id + ' fetchOrderBook() supports BTC/JPY only')
-        orderbook = self.publicGetOrderBooks(params)
-        return self.parse_order_book(orderbook)
+        self.load_markets()
+        response = self.publicGetOrderBooks(params)
+        return self.parse_order_book(response)
 
     def fetch_ticker(self, symbol, params={}):
         if symbol != 'BTC/JPY':
             raise NotSupported(self.id + ' fetchTicker() supports BTC/JPY only')
+        self.load_markets()
         ticker = self.publicGetTicker(params)
-        timestamp = ticker['timestamp'] * 1000
+        timestamp = self.safe_timestamp(ticker, 'timestamp')
         last = self.safe_float(ticker, 'last')
         return {
             'symbol': symbol,
@@ -252,8 +272,8 @@ class coincheck (Exchange):
                 ids = marketId.split('_')
                 baseId = ids[0]
                 quoteId = ids[1]
-                base = self.common_currency_code(baseId)
-                quote = self.common_currency_code(quoteId)
+                base = self.safe_currency_code(baseId)
+                quote = self.safe_currency_code(quoteId)
                 symbol = base + '/' + quote
         if symbol is None:
             if market is not None:
@@ -302,6 +322,7 @@ class coincheck (Exchange):
         }
 
     def fetch_my_trades(self, symbol=None, since=None, limit=None, params={}):
+        self.load_markets()
         market = self.market(symbol)
         response = self.privateGetExchangeOrdersTransactions(self.extend({}, params))
         transactions = self.safe_value(response, 'transactions', [])
@@ -310,6 +331,7 @@ class coincheck (Exchange):
     def fetch_trades(self, symbol, since=None, limit=None, params={}):
         if symbol != 'BTC/JPY':
             raise NotSupported(self.id + ' fetchTrades() supports BTC/JPY only')
+        self.load_markets()
         market = self.market(symbol)
         request = {
             'pair': market['id'],
@@ -321,26 +343,31 @@ class coincheck (Exchange):
         return self.parse_trades(data, market, since, limit)
 
     def create_order(self, symbol, type, side, amount, price=None, params={}):
-        order = {
+        self.load_markets()
+        request = {
             'pair': self.market_id(symbol),
         }
         if type == 'market':
             order_type = type + '_' + side
-            order['order_type'] = order_type
+            request['order_type'] = order_type
             prefix = (order_type + '_') if (side == 'buy') else ''
-            order[prefix + 'amount'] = amount
+            request[prefix + 'amount'] = amount
         else:
-            order['order_type'] = side
-            order['rate'] = price
-            order['amount'] = amount
-        response = self.privatePostExchangeOrders(self.extend(order, params))
+            request['order_type'] = side
+            request['rate'] = price
+            request['amount'] = amount
+        response = self.privatePostExchangeOrders(self.extend(request, params))
+        id = self.safe_string(response, 'id')
         return {
             'info': response,
-            'id': str(response['id']),
+            'id': id,
         }
 
     def cancel_order(self, id, symbol=None, params={}):
-        return self.privateDeleteExchangeOrdersId({'id': id})
+        request = {
+            'id': id,
+        }
+        return self.privateDeleteExchangeOrdersId(self.extend(request, params))
 
     def sign(self, path, api='public', method='GET', params={}, headers=None, body=None):
         url = self.urls['api'] + '/' + self.implode_params(path, params)
@@ -376,3 +403,49 @@ class coincheck (Exchange):
             if response['success']:
                 return response
         raise ExchangeError(self.id + ' ' + self.json(response))
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        id = self.safe_integer({
+            'a': msg[0],
+        }, 'a')
+        if id is None:
+            # orderbook
+            self._websocket_handle_ob(contextId, msg)
+
+    def _websocket_handle_ob(self, contextId, msg):
+        symbol = self.find_symbol(msg[0])
+        ob = msg[1]
+        # just testing
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if not('ob' in list(data.keys())):
+            ob = self.parse_order_book(ob, None)
+            data['ob'] = ob
+            self.emit('ob', symbol, self._cloneOrderBook(ob, data['limit']))
+        else:
+            data['ob'] = self.mergeOrderBookDelta(data['ob'], ob, None)
+            self.emit('ob', symbol, self._cloneOrderBook(data['ob'], data['limit']))
+        self._contextSetSymbolData(contextId, 'ob', symbol, data)
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        payload = {
+            'type': 'subscribe',
+            'channel': self.market_id(symbol) + '-orderbook',
+        }
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        data['limit'] = self.safe_integer(params, 'limit', None)
+        self._contextSetSymbolData(contextId, 'ob', symbol, data)
+        self.websocketSendJson(payload)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None

@@ -32,6 +32,7 @@ class okex extends okcoinusd {
                     'https://www.okex.com/docs/en/',
                 ),
                 'fees' => 'https://www.okex.com/pages/products/fees.html',
+                'referral' => 'https://www.okex.com',
             ),
             'fees' => array (
                 'trading' => array (
@@ -59,6 +60,7 @@ class okex extends okcoinusd {
                 'HSR' => 'HC',
                 'MAG' => 'Maggie',
                 'YOYO' => 'YOYOW',
+                'WIN' => 'WinToken', // https://github.com/ccxt/ccxt/issues/5701
             ),
             'wsconf' => array (
                 'conx-tpls' => array (
@@ -132,9 +134,9 @@ class okex extends okcoinusd {
 
     public function _websocket_on_channel ($contextId, $channel, $msg, $data) {
         // var_dump('========================',$msg);
-        if (mb_strpos ($channel, 'ok_sub_spot_') !== false) {
+        if (mb_strpos($channel, 'ok_sub_spot_') !== false) {
             // spot
-            $depthIndex = mb_strpos ($channel, '_depth');
+            $depthIndex = mb_strpos($channel, '_depth');
             if ($depthIndex > 0) {
                 // orderbook
                 $result = $this->safe_value($data, 'result', null);
@@ -143,8 +145,8 @@ class okex extends okcoinusd {
                     $this->emit ('err', $error);
                     return;
                 }
-                $channelName = str_replace ('ok_sub_spot_', '', $channel);
-                $parts = explode ('_depth', $channelName);
+                $channelName = str_replace('ok_sub_spot_', '', $channel);
+                $parts = explode('_depth', $channelName);
                 $pair = $parts[0];
                 $symbol = $this->_get_symbol_by_pair ($pair);
                 $timestamp = $this->safe_value($data, 'timestamp');
@@ -162,9 +164,9 @@ class okex extends okcoinusd {
                     $this->_cloneOrderBook ($symbolData['ob'], $symbolData['depth'])
                 );
             }
-        } else if (mb_strpos ($channel, 'ok_sub_future') !== false) {
+        } else if (mb_strpos($channel, 'ok_sub_future') !== false) {
             // future
-            $depthIndex = mb_strpos ($channel, '_depth');
+            $depthIndex = mb_strpos($channel, '_depth');
             if ($depthIndex > 0) {
                 // orderbook
                 $pair = $channel->substring (
@@ -191,15 +193,15 @@ class okex extends okcoinusd {
     }
 
     public function _websocket_dispatch ($contextId, $msg) {
-        // _websocketOnMsg [array ("binary":0,"$channel":"addChannel","data":array ("result":true,"$channel":"ok_sub_spot_btc_usdt_depth"))] default
+        // _websocketOnMsg [array("binary":0,"$channel":"addChannel","data":array ("result":true,"$channel":"ok_sub_spot_btc_usdt_depth"))] default
         // _websocketOnMsg [{"binary":0,"$channel":"ok_sub_spot_btc_usdt_depth","data":{"asks":[[
         $channel = $this->safe_string($msg, 'channel');
         if (!$channel) {
             // pong
             return;
         }
-        $resData = $this->safe_value($msg, 'data', array ());
-        if (is_array ($this->wsconf['methodmap']) && array_key_exists ($channel, $this->wsconf['methodmap'])) {
+        $resData = $this->safe_value($msg, 'data', array());
+        if (is_array($this->wsconf['methodmap']) && array_key_exists($channel, $this->wsconf['methodmap'])) {
             $method = $this->wsconf['methodmap'][$channel];
             $this->$method ($channel, $msg, $resData, $contextId);
         } else {
@@ -209,7 +211,7 @@ class okex extends okcoinusd {
 
     public function _websocket_on_message ($contextId, $data) {
         // var_dump ('_websocketOnMsg', $data);
-        $msgs = json_decode ($data, $as_associative_array = true);
+        $msgs = json_decode($data, $as_associative_array = true);
         if (gettype ($msgs) === 'array' && count (array_filter (array_keys ($msgs), 'is_string')) == 0) {
             for ($i = 0; $i < count ($msgs); $i++) {
                 $this->_websocket_dispatch ($contextId, $msgs[$i]);
@@ -221,7 +223,7 @@ class okex extends okcoinusd {
 
     public function _websocket_subscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
         if ($event !== 'ob') {
-            throw new NotSupported ('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+            throw new NotSupported('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
         }
         $data = $this->_contextGetSymbolData ($contextId, $event, $symbol);
         $data['depth'] = $params['depth'];
@@ -238,7 +240,7 @@ class okex extends okcoinusd {
 
     public function _websocket_unsubscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
         if ($event !== 'ob') {
-            throw new NotSupported ('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+            throw new NotSupported('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
         }
         $sendJson = array (
             'event' => 'removeChannel',
@@ -263,7 +265,7 @@ class okex extends okcoinusd {
         if ($this->_isFutureSymbol ($symbol)) {
             $contract_type = $params->contract_type;
             if (!$contract_type) {
-                throw new ExchangeError ('parameter $contract_type is required for the future.');
+                throw new ExchangeError('parameter $contract_type is required for the future.');
             }
             $channel = 'ok_sub_future' . $pair . '_depth_' . $contract_type . $depthParam;
         }
@@ -271,9 +273,9 @@ class okex extends okcoinusd {
     }
 
     public function _get_pair_by_symbol ($symbol) {
-        [$currencyBase, $currencyQuote] = explode ('/', $symbol);
-        $currencyBase = strtolower ($currencyBase);
-        $currencyQuote = strtolower ($currencyQuote);
+        [$currencyBase, $currencyQuote] = explode('/', $symbol);
+        $currencyBase = strtolower($currencyBase);
+        $currencyQuote = strtolower($currencyQuote);
         $pair = $currencyBase . '_' . $currencyQuote;
         if ($this->_isFutureSymbol ($symbol)) {
             $pair = $currencyQuote . '_' . $currencyBase;
@@ -282,16 +284,16 @@ class okex extends okcoinusd {
     }
 
     public function _get_symbol_by_pair ($pair, $isFuture = false) {
-        [$currency1, $currency2] = explode ('_', $pair);
-        $currency1 = strtoupper ($currency1);
-        $currency2 = strtoupper ($currency2);
+        [$currency1, $currency2] = explode('_', $pair);
+        $currency1 = strtoupper($currency1);
+        $currency2 = strtoupper($currency2);
         $symbol = $isFuture ? $currency2 . '/' . $currency1 : $currency1 . '/' . $currency2;
         return $symbol;
     }
 
     public function _get_current_websocket_orderbook ($contextId, $symbol, $limit) {
         $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
-        if (is_array ($data && $data['ob'] !== null) && array_key_exists ('ob', $data && $data['ob'] !== null)) {
+        if (is_array($data && $data['ob'] !== null) && array_key_exists('ob', $data && $data['ob'] !== null)) {
             return $this->_cloneOrderBook ($data['ob'], $limit);
         }
         return null;

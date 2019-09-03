@@ -6,6 +6,7 @@
 from ccxt.base.exchange import Exchange
 import hashlib
 import math
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import PermissionDenied
@@ -15,6 +16,7 @@ from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import OrderNotFound
 from ccxt.base.errors import OrderNotCached
 from ccxt.base.errors import CancelPending
+from ccxt.base.errors import NotSupported
 from ccxt.base.errors import DDoSProtection
 from ccxt.base.errors import ExchangeNotAvailable
 from ccxt.base.errors import InvalidNonce
@@ -29,6 +31,7 @@ class poloniex (Exchange):
             'name': 'Poloniex',
             'countries': ['US'],
             'rateLimit': 1000,  # up to 6 calls per second
+            'certified': True,  # 2019-06-07
             'has': {
                 'CORS': False,
                 'createDepositAddress': True,
@@ -37,7 +40,7 @@ class poloniex (Exchange):
                 'fetchClosedOrders': 'emulated',
                 'fetchCurrencies': True,
                 'fetchDepositAddress': True,
-                'fetchDeposits': 'emulated',
+                'fetchDeposits': True,
                 'fetchMyTrades': True,
                 'fetchOHLCV': True,
                 'fetchOpenOrder': True,  # True endpoint for a single open order
@@ -51,7 +54,8 @@ class poloniex (Exchange):
                 'fetchTradingFee': True,
                 'fetchTradingFees': True,
                 'fetchTransactions': True,
-                'fetchWithdrawals': 'emulated',  # but almost True )
+                'fetchWithdrawals': True,
+                'cancelAllOrders': True,
                 'withdraw': True,
             },
             'timeframes': {
@@ -68,9 +72,10 @@ class poloniex (Exchange):
                     'public': 'https://poloniex.com/public',
                     'private': 'https://poloniex.com/tradingApi',
                 },
-                'www': 'https://poloniex.com',
+                'www': 'https://www.poloniex.com',
                 'doc': 'https://docs.poloniex.com',
                 'fees': 'https://poloniex.com/fees',
+                'referral': 'https://www.poloniex.com/?utm_source=ccxt&utm_medium=web',
             },
             'api': {
                 'public': {
@@ -89,6 +94,7 @@ class poloniex (Exchange):
                         'buy',
                         'cancelLoanOffer',
                         'cancelOrder',
+                        'cancelAllOrders',
                         'closeMarginPosition',
                         'createLoanOffer',
                         'generateNewAddress',
@@ -118,12 +124,43 @@ class poloniex (Exchange):
                     ],
                 },
             },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://api2.poloniex.com',
+                    },
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'od': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
+            },
             # Fees are tier-based. More info: https://poloniex.com/fees/
             # Rates below are highest possible.
             'fees': {
                 'trading': {
-                    'maker': 0.001,
-                    'taker': 0.002,
+                    'maker': 0.15 / 100,
+                    'taker': 0.25 / 100,
                 },
                 'funding': {},
             },
@@ -216,12 +253,12 @@ class poloniex (Exchange):
 
     def parse_ohlcv(self, ohlcv, market=None, timeframe='5m', since=None, limit=None):
         return [
-            ohlcv['date'] * 1000,
-            ohlcv['open'],
-            ohlcv['high'],
-            ohlcv['low'],
-            ohlcv['close'],
-            ohlcv['quoteVolume'],
+            self.safe_timestamp(ohlcv, 'date'),
+            self.safe_float(ohlcv, 'open'),
+            self.safe_float(ohlcv, 'high'),
+            self.safe_float(ohlcv, 'low'),
+            self.safe_float(ohlcv, 'close'),
+            self.safe_float(ohlcv, 'quoteVolume'),
         ]
 
     def fetch_ohlcv(self, symbol, timeframe='5m', since=None, limit=None, params={}):
@@ -245,26 +282,29 @@ class poloniex (Exchange):
         markets = self.publicGetReturnTicker()
         keys = list(markets.keys())
         result = []
-        for p in range(0, len(keys)):
-            id = keys[p]
+        for i in range(0, len(keys)):
+            id = keys[i]
             market = markets[id]
             quoteId, baseId = id.split('_')
-            base = self.common_currency_code(baseId)
-            quote = self.common_currency_code(quoteId)
+            base = self.safe_currency_code(baseId)
+            quote = self.safe_currency_code(quoteId)
             symbol = base + '/' + quote
             limits = self.extend(self.limits, {
                 'cost': {
                     'min': self.safe_value(self.options['limits']['cost']['min'], quote),
                 },
             })
+            isFrozen = self.safe_string(market, 'isFrozen')
+            active = (isFrozen != '1')
             result.append(self.extend(self.fees['trading'], {
                 'id': id,
+                'id2': str(market['id']),
                 'symbol': symbol,
                 'baseId': baseId,
                 'quoteId': quoteId,
                 'base': base,
                 'quote': quote,
-                'active': market['isFrozen'] != '1',
+                'active': active,
                 'limits': limits,
                 'info': market,
             }))
@@ -272,27 +312,25 @@ class poloniex (Exchange):
 
     def fetch_balance(self, params={}):
         self.load_markets()
-        balances = self.privatePostReturnCompleteBalances(self.extend({
+        request = {
             'account': 'all',
-        }, params))
-        result = {'info': balances}
-        currencies = list(balances.keys())
-        for c in range(0, len(currencies)):
-            id = currencies[c]
-            balance = balances[id]
-            currency = self.common_currency_code(id)
-            account = {
-                'free': float(balance['available']),
-                'used': float(balance['onOrders']),
-                'total': 0.0,
-            }
-            account['total'] = self.sum(account['free'], account['used'])
-            result[currency] = account
+        }
+        response = self.privatePostReturnCompleteBalances(self.extend(request, params))
+        result = {'info': response}
+        currencyIds = list(response.keys())
+        for i in range(0, len(currencyIds)):
+            currencyId = currencyIds[i]
+            balance = self.safe_value(response, currencyId, {})
+            code = self.safe_currency_code(currencyId)
+            account = self.account()
+            account['free'] = self.safe_float(balance, 'available')
+            account['used'] = self.safe_float(balance, 'onOrders')
+            result[code] = account
         return self.parse_balance(result)
 
     def fetch_trading_fees(self, params={}):
         self.load_markets()
-        fees = self.privatePostReturnFeeInfo()
+        fees = self.privatePostReturnFeeInfo(params)
         return {
             'info': fees,
             'maker': self.safe_float(fees, 'makerFee'),
@@ -333,8 +371,8 @@ class poloniex (Exchange):
                 symbol = self.markets_by_id[marketId]['symbol']
             else:
                 quoteId, baseId = marketId.split('_')
-                base = self.common_currency_code(baseId)
-                quote = self.common_currency_code(quoteId)
+                base = self.safe_currency_code(baseId)
+                quote = self.safe_currency_code(quoteId)
                 symbol = base + '/' + quote
             orderbook = self.parse_order_book(response[marketId])
             orderbook['nonce'] = self.safe_integer(response[marketId], 'seq')
@@ -380,8 +418,8 @@ class poloniex (Exchange):
 
     def fetch_tickers(self, symbols=None, params={}):
         self.load_markets()
-        tickers = self.publicGetReturnTicker(params)
-        ids = list(tickers.keys())
+        response = self.publicGetReturnTicker(params)
+        ids = list(response.keys())
         result = {}
         for i in range(0, len(ids)):
             id = ids[i]
@@ -392,26 +430,26 @@ class poloniex (Exchange):
                 symbol = market['symbol']
             else:
                 quoteId, baseId = id.split('_')
-                base = self.common_currency_code(baseId)
-                quote = self.common_currency_code(quoteId)
+                base = self.safe_currency_code(baseId)
+                quote = self.safe_currency_code(quoteId)
                 symbol = base + '/' + quote
                 market = {'symbol': symbol}
-            ticker = tickers[id]
+            ticker = response[id]
             result[symbol] = self.parse_ticker(ticker, market)
         return result
 
     def fetch_currencies(self, params={}):
-        currencies = self.publicGetReturnCurrencies(params)
-        ids = list(currencies.keys())
+        response = self.publicGetReturnCurrencies(params)
+        ids = list(response.keys())
         result = {}
         for i in range(0, len(ids)):
             id = ids[i]
-            currency = currencies[id]
+            currency = response[id]
             # todo: will need to rethink the fees
             # to add support for multiple withdrawal/deposit methods and
             # differentiated fees for each particular method
             precision = 8  # default precision, todo: fix "magic constants"
-            code = self.common_currency_code(id)
+            code = self.safe_currency_code(id)
             active = (currency['delisted'] == 0) and not currency['disabled']
             result[code] = {
                 'id': id,
@@ -445,8 +483,8 @@ class poloniex (Exchange):
     def fetch_ticker(self, symbol, params={}):
         self.load_markets()
         market = self.market(symbol)
-        tickers = self.publicGetReturnTicker(params)
-        ticker = tickers[market['id']]
+        response = self.publicGetReturnTicker(params)
+        ticker = response[market['id']]
         return self.parse_ticker(ticker, market)
 
     def parse_trade(self, trade, market=None):
@@ -520,14 +558,15 @@ class poloniex (Exchange):
                 'currency': currency,
             }
         return {
+            'id': id,
             'info': trade,
             'timestamp': timestamp,
             'datetime': self.iso8601(timestamp),
             'symbol': symbol,
-            'id': id,
             'order': orderId,
             'type': 'limit',
             'side': side,
+            'takerOrMaker': None,
             'price': price,
             'amount': amount,
             'cost': cost,
@@ -628,8 +667,8 @@ class poloniex (Exchange):
                             result.append(trades[j])
                     else:
                         quoteId, baseId = id.split('_')
-                        base = self.common_currency_code(baseId)
-                        quote = self.common_currency_code(quoteId)
+                        base = self.safe_currency_code(baseId)
+                        quote = self.safe_currency_code(quoteId)
                         symbol = base + '/' + quote
                         trades = response[id]
                         for j in range(0, len(trades)):
@@ -709,9 +748,10 @@ class poloniex (Exchange):
         side = self.safe_string(order, 'side', type)
         if type == side:
             type = None
+        id = self.safe_string(order, 'orderNumber')
         return {
             'info': order,
-            'id': order['orderNumber'],
+            'id': id,
             'timestamp': timestamp,
             'datetime': self.iso8601(timestamp),
             'lastTradeTimestamp': None,
@@ -746,9 +786,10 @@ class poloniex (Exchange):
         if symbol is not None:
             market = self.market(symbol)
         pair = market['id'] if market else 'all'
-        response = self.privatePostReturnOpenOrders(self.extend({
+        request = {
             'currencyPair': pair,
-        }))
+        }
+        response = self.privatePostReturnOpenOrders(self.extend(request, params))
         openOrders = []
         if market is not None:
             openOrders = self.parse_open_orders(response, market, openOrders)
@@ -895,6 +936,32 @@ class poloniex (Exchange):
             self.orders[id]['status'] = 'canceled'
         return response
 
+    def cancel_all_orders(self, symbol=None, params={}):
+        request = {}
+        market = None
+        if symbol is not None:
+            market = self.market(symbol)
+            request['currencyPair'] = market['id']
+        response = self.privatePostCancelAllOrders(self.extend(request, params))
+        #
+        #     {
+        #         "success": 1,
+        #         "message": "Orders canceled",
+        #         "orderNumbers": [
+        #             503749,
+        #             888321,
+        #             7315825,
+        #             7316824
+        #         ]
+        #     }
+        #
+        orderIds = self.safe_value(response, 'orderNumbers', [])
+        for i in range(0, len(orderIds)):
+            id = str(orderIds[i])
+            if id in self.orders:
+                self.orders[id]['status'] = 'canceled'
+        return response
+
     def fetch_open_order(self, id, symbol=None, params={}):
         self.load_markets()
         id = str(id)
@@ -934,17 +1001,19 @@ class poloniex (Exchange):
 
     def fetch_order_trades(self, id, symbol=None, since=None, limit=None, params={}):
         self.load_markets()
-        trades = self.privatePostReturnOrderTrades(self.extend({
+        request = {
             'orderNumber': id,
-        }, params))
+        }
+        trades = self.privatePostReturnOrderTrades(self.extend(request, params))
         return self.parse_trades(trades)
 
     def create_deposit_address(self, code, params={}):
         self.load_markets()
         currency = self.currency(code)
-        response = self.privatePostGenerateNewAddress({
+        request = {
             'currency': currency['id'],
-        })
+        }
+        response = self.privatePostGenerateNewAddress(self.extend(request, params))
         address = None
         tag = None
         if response['success'] == 1:
@@ -964,7 +1033,7 @@ class poloniex (Exchange):
     def fetch_deposit_address(self, code, params={}):
         self.load_markets()
         currency = self.currency(code)
-        response = self.privatePostReturnDepositAddresses()
+        response = self.privatePostReturnDepositAddresses(params)
         currencyId = currency['id']
         address = self.safe_string(response, currencyId)
         tag = None
@@ -991,10 +1060,10 @@ class poloniex (Exchange):
         }
         if tag:
             request['paymentId'] = tag
-        result = self.privatePostWithdraw(self.extend(request, params))
+        response = self.privatePostWithdraw(self.extend(request, params))
         return {
-            'info': result,
-            'id': result['response'],
+            'info': response,
+            'id': self.safe_string(response, 'withdrawalNumber'),
         }
 
     def fetch_transactions_helper(self, code=None, since=None, limit=None, params={}):
@@ -1125,16 +1194,9 @@ class poloniex (Exchange):
         #         "withdrawalNumber": 11162900
         #     }
         #
-        timestamp = self.safe_integer(transaction, 'timestamp')
-        if timestamp is not None:
-            timestamp = timestamp * 1000
-        code = None
+        timestamp = self.safe_timestamp(transaction, 'timestamp')
         currencyId = self.safe_string(transaction, 'currency')
-        currency = self.safe_value(self.currencies_by_id, currencyId)
-        if currency is None:
-            code = self.common_currency_code(currencyId)
-        if currency is not None:
-            code = currency['code']
+        code = self.safe_currency_code(currencyId)
         status = self.safe_string(transaction, 'status', 'pending')
         txid = self.safe_string(transaction, 'txid')
         if status is not None:
@@ -1193,7 +1255,7 @@ class poloniex (Exchange):
             }
         return {'url': url, 'method': method, 'body': body, 'headers': headers}
 
-    def handle_errors(self, code, reason, url, method, headers, body, response):
+    def handle_errors(self, code, reason, url, method, headers, body, response, requestHeaders, requestBody):
         if response is None:
             return
         # {"error":"Permission denied."}
@@ -1208,3 +1270,380 @@ class poloniex (Exchange):
             if broadKey is not None:
                 raise broad[broadKey](feedback)
             raise ExchangeError(feedback)  # unknown message
+
+    def _websocket_generate_url_stream(self, events, options):
+        return options['url']
+
+    def _websocket_market_id(self, symbol):
+        return self.market_id(symbol).lower()
+
+    def _websocket_on_open(self, contextId, websocketOptions):
+        symbolIds = {}
+        self._contextSet(contextId, 'symbolids', symbolIds)
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        # console.log("msg::",msg)
+        channelId = msg[0]
+        # if channelId is not one of the above, check if it is a marketId
+        symbolsIds = self._contextGet(contextId, 'symbolids')
+        channelIdStr = str(channelId)
+        if channelIdStr in symbolsIds:
+            # both 'ob' and 'trade' are handled by the same execution branch
+            # as on poloniex they are part of the same endpoint
+            symbol = symbolsIds[channelIdStr]
+            self._websocketHandleOb(contextId, symbol, msg)
+        elif channelIdStr == '1000':
+            # Private Channel
+            self._websocket_handle_orders(contextId, msg)
+        elif channelIdStr == '1010':
+            # Hearthbeat
+        else:
+            # Some error occured
+            self.emit('err', ExchangeError(self.id + '._websocketOnMessage() failed to get symbol for channelId: ' + channelIdStr))
+            self.websocketClose(contextId)
+
+    def _websocket_parse_trade(self, trade, symbol):
+        # Websocket trade format different than REST trade format
+        id = trade[1]
+        side = 'buy' if (trade[2] == 1) else 'sell'
+        price = float(trade[3])
+        amount = float(trade[4])
+        timestamp = trade[5] * 1000  # ms resolution
+        return {
+            'id': id,
+            'info': trade,
+            'timestamp': timestamp,
+            'datetime': self.iso8601(timestamp),
+            'symbol': symbol,
+            'type': None,
+            'side': side,
+            'price': price,
+            'amount': amount,
+        }
+
+    def _websocket_handle_orders(self, contextId, data):
+        # return if it is only acknowledge of connection
+        mktsymbolsIds = self._contextGet(contextId, 'mktsymbolids')
+        od = self._contextGetSymbolData(contextId, 'od', 'all')
+        if od['od'] is None:
+            od['od'] = {}
+        if data[1] == 1:
+            self.emit('od', self._cloneOrders(od['od']))
+            return 
+        datareceived = data[2]
+        for i in range(0, len(datareceived)):
+            msg = datareceived[i]
+            if msg[0] == 'b':
+                # Balance Update ==> Not use at the moment
+            elif msg[0] == 'n':
+                # New Order : ["n", <currency pair id>, <t order number>, <order type>, "<rate>", "<amount>", "<date>"]
+                side = 'buy' if (msg[3] == 1) else 'sell'
+                timestamp = msg[6] * 1000
+                order = {
+                    'id': msg[2],
+                    'timestamp': timestamp,
+                    'datetime': self.iso8601(timestamp),
+                    'status': 'open',
+                    'type': 'limit',
+                    'side': side,
+                    'price': float(msg[4]),
+                    'amount': float(msg[5]),
+                    'symbol': mktsymbolsIds[msg[1]],
+                    'remaining': float(msg[5]),
+                    'filled': 0.0,
+                    'cost': 0.0,
+                    'trades': [],
+                    'info': msg,
+                }
+                orderid = order['id']
+                od['od'][orderid] = order
+            elif msg[0] == 'o':
+                order = self._websocketReturnOrder(od['od'],msg[1],msg)
+                order['remaining'] = float(msg[2])
+                if float(order['remaining']) == 0:
+                    order['status'] = 'closed'
+                od['od'][msg[1]] = order
+            elif msg[0] == 't':
+                order = self._websocketReturnOrder(od['od'],msg[6],msg)
+                trade = self._websocket_parse_trade(msg, order['symbol'])
+                order['filled'] = float(order['filled']) + float(msg[3])
+                order['cost'] = float(order['cost']) + float(msg[7])
+                order['trades'].append(trade)
+                od['od'][msg[6]] = order
+            else:
+                self.emit('err', ExchangeError('Message Type ' + msg[0] + ' is not handle at the moment'))
+        self._contextSetSymbolData(contextId, 'od', 'all', od)
+        self.emit('od', self._cloneOrders(od['od']))
+    _websocketReturnOrder(orders,orderId,msg) {
+        #Return the order if it exist or a dummy order to keep track of what we receive
+        if (orders[orderId] is not None){
+            return orders[orderId]
+        else:
+            return {
+                'id': orderId,
+                'status': 'open',
+                'remaining': 0.0,
+                'filled': 0.0,
+                'cost': 0.0,
+                'trades': [],
+                'info': msg
+    _websocketHandleOb(contextId, symbol, data) {
+        # Poloniex calls self Price Aggregated Book
+        # channelId = data[0]
+        sequenceNumber = data[1]
+        if len(data) > 2:
+            orderbook = data[2]
+            # symbol = str(self.find_symbol(channelId))
+            # Check if self is the first response which contains full current orderbook
+            if orderbook[0][0] == 'i':
+                if not self._contextIsSubscribed(contextId, 'ob', symbol):
+                    return
+                symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+                # currencyPair = orderbook[0][1]['currencyPair']
+                fullOrderbook = orderbook[0][1]['orderBook']
+                asks = []
+                bids = []
+                keys = []
+                i = 0
+                keys = list(fullOrderbook[0].keys())
+                for i in range(0, len(keys)):
+                    asks.append([float(keys[i]), float(fullOrderbook[0][keys[i]])])
+                keys = list(fullOrderbook[1].keys())
+                for i in range(0, len(keys)):
+                    bids.append([float(keys[i]), float(fullOrderbook[1][keys[i]])])
+                fullOrderbook = {
+                    'asks': asks,
+                    'bids': bids,
+                    'isFrozen': 0,
+                    'seq': sequenceNumber,
+                }
+                # I decided not to push the initial orderbook to cache.
+                # This way is less consistent but I think it's easier.
+                fullOrderbook = self.parse_order_book(fullOrderbook)
+                fullOrderbook = self._cloneOrderBook(fullOrderbook, symbolData['limit'])
+                fullOrderbook['obLastSequenceNumber'] = sequenceNumber
+                symbolData['ob'] = fullOrderbook
+                self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+                self.emit('ob', symbol, symbolData['ob'])
+            else:
+                order = None
+                orderbookDelta = {
+                    'asks': [],
+                    'bids': [],
+                    'seq': sequenceNumber,
+                }
+                price = 0.0
+                amount = 0.0
+                i = 0
+                for i in range(0, len(orderbook)):
+                    order = orderbook[i]
+                    if order[0] == 'o':
+                        price = float(order[2])
+                        amount = float(order[3])
+                        if order[1] == 0:
+                            # sell order
+                            orderbookDelta['asks'].append([price, amount])
+                        elif order[1] == 1:
+                            # buy order
+                            orderbookDelta['bids'].append([price, amount])
+                        else:
+                            # error
+                            self.emit('err', ExchangeError(self.id + '._websocketHandleOb() unknown value in buy/sell field. Expected 0 or 1 but got: ' + order[1]))
+                            self.websocketClose(contextId)
+                            return
+                    elif order[0] == 't':
+                        # self is not an order but a trade
+                        if self._contextIsSubscribed(contextId, 'trade', symbol):
+                            trade = self._websocket_parse_trade(order, symbol)
+                            self.emit('trade', symbol, trade)
+                        continue
+                    else:
+                        # unknown value
+                        self.emit('err', ExchangeError(self.id + '._websocketHandleOb() unknown value in order/trade field. Expected \'o\' or \'t\' but got: ' + order[0]))
+                        self.websocketClose(contextId)
+                        return
+                if not self._contextIsSubscribed(contextId, 'ob', symbol):
+                    return
+                # Add to cache
+                orderbookDelta = self.parse_order_book(orderbookDelta)
+                symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+                if (symbolData['obDeltaCache']) is None:
+                    # This check is necessary because the obDeltaCache will be deleted on a call to fetchOrderBook()
+                    symbolData['obDeltaCache'] = {}  # make empty cache
+                    symbolData['obDeltaCacheSize'] = 0  # counting number of cached deltas
+                symbolData['obDeltaCacheSize'] += 1
+                sequenceNumberStr = str(sequenceNumber)
+                symbolData['obDeltaCache'][sequenceNumberStr] = orderbookDelta
+                # Schedule call to _websocketOrderBookDeltaCache()
+                self._websocket_handle_ob_delta_cache(contextId, symbol)
+                self.emit('ob', symbol, symbolData['ob'])
+
+    def _websocket_handle_ob_delta_cache(self, contextId, symbol):
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        # Handle out-of-order sequenceNumber
+        # To avoid a memory leak, we must put a maximum on the size of obDeltaCache.
+        # When self maximum is reached, we accept that we have lost some orderbook updates.
+        # In self case we must fetch a new orderbook.
+        # Alternatively, we could apply all cached deltas and keep going.
+        if symbolData['obDeltaCacheSize'] > symbolData['obDeltaCacheSizeMax']:
+            symbolData['ob'] = self.fetch_order_book(symbol, symbolData['limit'])
+            # del symbolData['obDeltaCache']
+            symbolData['obDeltaCache'] = None
+            symbolData['obDeltaCacheSize'] = 0
+            self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+            return
+        if symbolData['obDeltaCacheSize'] == 0:
+            self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+            return
+        # if the cache exists
+        # check if the next sequenceNumber is in the cache
+        fullOrderbook = symbolData['ob']
+        lastSequenceNumber = fullOrderbook['obLastSequenceNumber']
+        cachedSequenceNumber = lastSequenceNumber + 1
+        cachedSequenceNumberStr = str(cachedSequenceNumber)
+        orderbookDelta = symbolData['obDeltaCache'][cachedSequenceNumberStr]
+        continueBool = orderbookDelta is not None
+        # While loop is not transpiled properly
+        # while(continueBool) {
+        nkeys = symbolData['obDeltaCacheSize']
+        i = 0
+        for i in range(0, nkeys):
+            if not continueBool:
+                break
+            symbolData['obDeltaCache'][cachedSequenceNumberStr] = None
+            fullOrderbook = self.mergeOrderBookDelta(symbolData['ob'], orderbookDelta)
+            fullOrderbook = self._cloneOrderBook(fullOrderbook, symbolData['limit'])
+            fullOrderbook['obLastSequenceNumber'] = cachedSequenceNumber
+            symbolData['ob'] = fullOrderbook
+            cachedSequenceNumber += 1
+            orderbookDelta = symbolData['obDeltaCache'][cachedSequenceNumberStr]
+            continueBool = orderbookDelta is not None
+            symbolData['obDeltaCacheSize'] -= 1
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+
+    def _websocket_subscribe_ob(self, contextId, event, symbol, nonce, params={}):
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        symbolData['limit'] = self.safe_integer(params, 'limit', None)
+        symbolData['obDeltaCache'] = None
+        symbolData['obDeltaCacheSize'] = 0
+        symbolData['obDeltaCacheSizeMax'] = self.safe_integer(params, 'obDeltaCacheSizeMax', 10)
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+        # get symbol id2
+        # market = self.market_id(symbol)
+        if not self._contextIsSubscribed(contextId, 'trade', symbol):
+            market = self.find_market(symbol)
+            symbolsIds = self._contextGet(contextId, 'symbolids')
+            if (symbolsIds is None){
+                symbolsIds = {}
+            symbolsIds[market['id2']] = symbol
+            self._contextSet(contextId, 'symbolids', symbolsIds)
+            payload = {
+                'command': 'subscribe',
+                'channel': market['id'],
+            }
+            self.websocketSendJson(payload)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_subscribe_trade(self, contextId, event, symbol, nonce, params={}):
+        if not self._contextIsSubscribed(contextId, 'ob', symbol):
+            market = self.find_market(symbol)
+            symbolsIds = self._contextGet(contextId, 'symbolids')
+            symbolsIds[market['id2']] = symbol
+            self._contextSet(contextId, 'symbolids', symbolsIds)
+            payload = {
+                'command': 'subscribe',
+                'channel': market['id'],
+            }
+            self.websocketSendJson(payload)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_register_mkt_symbol(self, contextId):
+        market = self.fetch_markets()
+        mktsymbolsIds = {}
+        for i in range(0, len(market)):
+            mktsymbolsIds[market[i]['id2']] = market[i]['symbol']
+        self._contextSet(contextId, 'mktsymbolids', mktsymbolsIds)
+
+    def _websocket_register_cur_symbol(self, contextId):
+        currencies = self.fetch_currencies()
+        ids = list(currencies.keys())
+        cursymbolsIds = {}
+        for i in range(0, len(ids)):
+            currency = currencies[ids[i]]
+            cursymbolsIds[currency['info']['id']] = currency['id']
+        self._contextSet(contextId, 'cursymbolids', cursymbolsIds)
+
+    def _websocket_subscribe_orders(self, contextId, event, nonce, params={}):
+        if not self._contextIsSubscribed(contextId, 'ob', 'all'):
+            data = self._contextGetSymbolData(contextId, event, 'all')
+            data['od'] = None
+            self._contextSetSymbolData(contextId, event, 'all', data)
+            # Setup Market Conversion table
+            self._websocket_register_mkt_symbol(contextId)
+            # Setup Currency Conversion Table
+            self._websocket_register_cur_symbol(contextId)
+            payload = {
+                'command': 'subscribe',
+                'channel': 1000,
+                'key': self.apiKey,
+                'payload': 'nonce=' + nonce,
+                'sign': self.hmac(self.encode('nonce=' + nonce), self.encode(self.secret), hashlib.sha512),
+            }
+            self.websocketSendJson(payload)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event == 'ob':
+            self._websocket_subscribe_ob(contextId, event, symbol, nonce, params)
+        elif event == 'trade':
+            self._websocket_subscribe_trade(contextId, event, symbol, nonce, params)
+        elif event == 'od':
+            self._websocket_subscribe_orders(contextId, event, nonce, params)
+        else:
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+
+    def _websocket_unsubscribe_ob(self, conxid, event, symbol, nonce, params):
+        if not self._contextIsSubscribed(conxid, 'trade', symbol):
+            market = self.market_id(symbol)
+            payload = {
+                'command': 'unsubscribe',
+                'channel': market,
+            }
+            self.websocketSendJson(payload)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_unsubscribe_trade(self, conxid, event, symbol, nonce, params):
+        if not self._contextIsSubscribed(conxid, 'ob', symbol):
+            market = self.market_id(symbol)
+            payload = {
+                'command': 'unsubscribe',
+                'channel': market,
+            }
+            self.websocketSendJson(payload)
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_unsubscribe(self, conxid, event, symbol, nonce, params):
+        if event == 'ob':
+            self._websocket_unsubscribe_ob(conxid, event, symbol, nonce, params)
+        elif event == 'trade':
+            self._websocket_unsubscribe_trade(conxid, event, symbol, nonce, params)
+        else:
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None
+
+    def _get_current_orders(self, contextId, orderid):
+        data = self._contextGetSymbolData(contextId, 'od', 'all')
+        if 'od' in data and data['od'] is not None:
+            return self._cloneOrders(data['od'], orderid)
+        return None

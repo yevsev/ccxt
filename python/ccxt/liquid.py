@@ -5,12 +5,14 @@
 
 from ccxt.base.exchange import Exchange
 import math
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import ArgumentsRequired
 from ccxt.base.errors import InsufficientFunds
 from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import OrderNotFound
+from ccxt.base.errors import NotSupported
 from ccxt.base.errors import DDoSProtection
 from ccxt.base.errors import InvalidNonce
 
@@ -26,6 +28,7 @@ class liquid (Exchange):
             'rateLimit': 1000,
             'has': {
                 'CORS': False,
+                'fetchCurrencies': True,
                 'fetchTickers': True,
                 'fetchOrder': True,
                 'fetchOrders': True,
@@ -38,8 +41,7 @@ class liquid (Exchange):
                 'api': 'https://api.liquid.com',
                 'www': 'https://www.liquid.com',
                 'doc': [
-                    'https://developers.quoine.com',
-                    'https://developers.quoine.com/v2',
+                    'https://developers.liquid.com',
                 ],
                 'fees': 'https://help.liquid.com/getting-started-with-liquid/the-platform/fee-structure',
                 'referral': 'https://www.liquid.com?affiliate=SbzC62lt30976',
@@ -92,7 +94,6 @@ class liquid (Exchange):
                     ],
                 },
             },
-            'skipJsonOnStatusCodes': [401],
             'exceptions': {
                 'API rate limit exceeded. Please retry after 300s': DDoSProtection,
                 'API Authentication failed': AuthenticationError,
@@ -106,9 +107,30 @@ class liquid (Exchange):
             },
             'commonCurrencies': {
                 'WIN': 'WCOIN',
+                'HOT': 'HOT Token',
             },
             'options': {
                 'cancelOrderException': True,
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'pusher',
+                        'baseurl': 'wss://ws.pusherapp.com/app/2ff981bb060680b5ce97',
+                    },
+                },
+                'methodmap': {
+                    '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
             },
         })
 
@@ -137,7 +159,7 @@ class liquid (Exchange):
         for i in range(0, len(response)):
             currency = response[i]
             id = self.safe_string(currency, 'currency')
-            code = self.common_currency_code(id)
+            code = self.safe_currency_code(id)
             active = currency['depositable'] and currency['withdrawable']
             amountPrecision = self.safe_integer(currency, 'display_precision')
             pricePrecision = self.safe_integer(currency, 'quoting_precision')
@@ -211,8 +233,8 @@ class liquid (Exchange):
             id = str(market['id'])
             baseId = market['base_currency']
             quoteId = market['quoted_currency']
-            base = self.common_currency_code(baseId)
-            quote = self.common_currency_code(quoteId)
+            base = self.safe_currency_code(baseId)
+            quote = self.safe_currency_code(quoteId)
             symbol = base + '/' + quote
             maker = self.safe_float(market, 'maker_fee')
             taker = self.safe_float(market, 'taker_fee')
@@ -226,10 +248,10 @@ class liquid (Exchange):
             minAmount = None
             if baseCurrency is not None:
                 minAmount = self.safe_float(baseCurrency['info'], 'minimum_order_quantity')
-                precision['amount'] = self.safe_integer(baseCurrency['info'], 'quoting_precision')
+                # precision['amount'] = self.safe_integer(baseCurrency['info'], 'quoting_precision')
             minPrice = None
             if quoteCurrency is not None:
-                precision['price'] = self.safe_integer(quoteCurrency['info'], 'display_precision')
+                precision['price'] = self.safe_integer(quoteCurrency['info'], 'quoting_precision')
                 minPrice = math.pow(10, -precision['price'])
             minCost = None
             if minPrice is not None:
@@ -267,29 +289,31 @@ class liquid (Exchange):
 
     def fetch_balance(self, params={}):
         self.load_markets()
-        balances = self.privateGetAccountsBalance(params)
-        result = {'info': balances}
-        for b in range(0, len(balances)):
-            balance = balances[b]
-            currencyId = balance['currency']
-            code = currencyId
-            if currencyId in self.currencies_by_id:
-                code = self.currencies_by_id[currencyId]['code']
-            total = float(balance['balance'])
-            account = {
-                'free': total,
-                'used': None,
-                'total': total,
-            }
+        response = self.privateGetAccountsBalance(params)
+        #
+        #     [
+        #         {"currency":"USD","balance":"0.0"},
+        #         {"currency":"BTC","balance":"0.0"},
+        #         {"currency":"ETH","balance":"0.1651354"}
+        #     ]
+        #
+        result = {'info': response}
+        for i in range(0, len(response)):
+            balance = response[i]
+            currencyId = self.safe_string(balance, 'currency')
+            code = self.safe_currency_code(currencyId)
+            account = self.account()
+            account['total'] = self.safe_float(balance, 'balance')
             result[code] = account
         return self.parse_balance(result)
 
     def fetch_order_book(self, symbol, limit=None, params={}):
         self.load_markets()
-        orderbook = self.publicGetProductsIdPriceLevels(self.extend({
+        request = {
             'id': self.market_id(symbol),
-        }, params))
-        return self.parse_order_book(orderbook, None, 'buy_price_levels', 'sell_price_levels')
+        }
+        response = self.publicGetProductsIdPriceLevels(self.extend(request, params))
+        return self.parse_order_book(response, None, 'buy_price_levels', 'sell_price_levels')
 
     def parse_ticker(self, ticker, market=None):
         timestamp = self.milliseconds()
@@ -310,7 +334,7 @@ class liquid (Exchange):
                 if symbol in self.markets:
                     market = self.markets[symbol]
                 else:
-                    symbol = self.common_currency_code(baseId) + '/' + self.common_currency_code(quoteId)
+                    symbol = self.safe_currency_code(baseId) + '/' + self.safe_currency_code(quoteId)
         if market is not None:
             symbol = market['symbol']
         change = None
@@ -347,10 +371,10 @@ class liquid (Exchange):
 
     def fetch_tickers(self, symbols=None, params={}):
         self.load_markets()
-        tickers = self.publicGetProducts(params)
+        response = self.publicGetProducts(params)
         result = {}
-        for t in range(0, len(tickers)):
-            ticker = self.parse_ticker(tickers[t])
+        for i in range(0, len(response)):
+            ticker = self.parse_ticker(response[i])
             symbol = ticker['symbol']
             result[symbol] = ticker
         return result
@@ -358,10 +382,11 @@ class liquid (Exchange):
     def fetch_ticker(self, symbol, params={}):
         self.load_markets()
         market = self.market(symbol)
-        ticker = self.publicGetProductsId(self.extend({
+        request = {
             'id': market['id'],
-        }, params))
-        return self.parse_ticker(ticker, market)
+        }
+        response = self.publicGetProductsId(self.extend(request, params))
+        return self.parse_ticker(response, market)
 
     def parse_trade(self, trade, market):
         # {            id:  12345,
@@ -370,7 +395,7 @@ class liquid (Exchange):
         #       taker_side: "sell",
         #       created_at:  1512345678,
         #          my_side: "buy"           }
-        timestamp = trade['created_at'] * 1000
+        timestamp = self.safe_timestamp(trade, 'created_at')
         orderId = self.safe_string(trade, 'order_id')
         # 'taker_side' gets filled for both fetchTrades and fetchMyTrades
         takerSide = self.safe_string(trade, 'taker_side')
@@ -386,9 +411,10 @@ class liquid (Exchange):
         if price is not None:
             if amount is not None:
                 cost = price * amount
+        id = self.safe_string(trade, 'id')
         return {
             'info': trade,
-            'id': str(trade['id']),
+            'id': id,
             'order': orderId,
             'timestamp': timestamp,
             'datetime': self.iso8601(timestamp),
@@ -432,42 +458,64 @@ class liquid (Exchange):
 
     def create_order(self, symbol, type, side, amount, price=None, params={}):
         self.load_markets()
-        order = {
+        request = {
             'order_type': type,
             'product_id': self.market_id(symbol),
             'side': side,
             'quantity': self.amount_to_precision(symbol, amount),
         }
         if type == 'limit':
-            order['price'] = self.price_to_precision(symbol, price)
-        response = self.privatePostOrders(self.extend(order, params))
+            request['price'] = self.price_to_precision(symbol, price)
+        response = self.privatePostOrders(self.extend(request, params))
+        #
+        #     {
+        #         "id": 2157474,
+        #         "order_type": "limit",
+        #         "quantity": "0.01",
+        #         "disc_quantity": "0.0",
+        #         "iceberg_total_quantity": "0.0",
+        #         "side": "sell",
+        #         "filled_quantity": "0.0",
+        #         "price": "500.0",
+        #         "created_at": 1462123639,
+        #         "updated_at": 1462123639,
+        #         "status": "live",
+        #         "leverage_level": 1,
+        #         "source_exchange": "QUOINE",
+        #         "product_id": 1,
+        #         "product_code": "CASH",
+        #         "funding_currency": "USD",
+        #         "currency_pair_code": "BTCUSD",
+        #         "order_fee": "0.0"
+        #     }
+        #
         return self.parse_order(response)
 
     def cancel_order(self, id, symbol=None, params={}):
         self.load_markets()
-        result = self.privatePutOrdersIdCancel(self.extend({
+        request = {
             'id': id,
-        }, params))
-        order = self.parse_order(result)
+        }
+        response = self.privatePutOrdersIdCancel(self.extend(request, params))
+        order = self.parse_order(response)
         if order['status'] == 'closed':
             if self.options['cancelOrderException']:
-                raise OrderNotFound(self.id + ' order closed already: ' + self.json(result))
+                raise OrderNotFound(self.id + ' order closed already: ' + self.json(response))
         return order
 
     def edit_order(self, id, symbol, type, side, amount, price=None, params={}):
         self.load_markets()
         if price is None:
             raise ArgumentsRequired(self.id + ' editOrder requires the price argument')
-        order = {
+        request = {
             'order': {
                 'quantity': self.amount_to_precision(symbol, amount),
                 'price': self.price_to_precision(symbol, price),
             },
-        }
-        result = self.privatePutOrdersId(self.extend({
             'id': id,
-        }, order))
-        return self.parse_order(result)
+        }
+        response = self.privatePutOrdersId(self.extend(request, params))
+        return self.parse_order(response)
 
     def parse_order_status(self, status):
         statuses = {
@@ -478,10 +526,65 @@ class liquid (Exchange):
         return self.safe_string(statuses, status, status)
 
     def parse_order(self, order, market=None):
+        #
+        # createOrder
+        #
+        #     {
+        #         "id": 2157474,
+        #         "order_type": "limit",
+        #         "quantity": "0.01",
+        #         "disc_quantity": "0.0",
+        #         "iceberg_total_quantity": "0.0",
+        #         "side": "sell",
+        #         "filled_quantity": "0.0",
+        #         "price": "500.0",
+        #         "created_at": 1462123639,
+        #         "updated_at": 1462123639,
+        #         "status": "live",
+        #         "leverage_level": 1,
+        #         "source_exchange": "QUOINE",
+        #         "product_id": 1,
+        #         "product_code": "CASH",
+        #         "funding_currency": "USD",
+        #         "currency_pair_code": "BTCUSD",
+        #         "order_fee": "0.0"
+        #     }
+        #
+        # fetchOrder, fetchOrders, fetchOpenOrders, fetchClosedOrders
+        #
+        #     {
+        #         "id": 2157479,
+        #         "order_type": "limit",
+        #         "quantity": "0.01",
+        #         "disc_quantity": "0.0",
+        #         "iceberg_total_quantity": "0.0",
+        #         "side": "sell",
+        #         "filled_quantity": "0.01",
+        #         "price": "500.0",
+        #         "created_at": 1462123639,
+        #         "updated_at": 1462123639,
+        #         "status": "filled",
+        #         "leverage_level": 2,
+        #         "source_exchange": "QUOINE",
+        #         "product_id": 1,
+        #         "product_code": "CASH",
+        #         "funding_currency": "USD",
+        #         "currency_pair_code": "BTCUSD",
+        #         "order_fee": "0.0",
+        #         "executions": [
+        #             {
+        #                 "id": 4566133,
+        #                 "quantity": "0.01",
+        #                 "price": "500.0",
+        #                 "taker_side": "buy",
+        #                 "my_side": "sell",
+        #                 "created_at": 1465396785
+        #             }
+        #         ]
+        #     }
+        #
         orderId = self.safe_string(order, 'id')
-        timestamp = self.safe_integer(order, 'created_at')
-        if timestamp is not None:
-            timestamp = timestamp * 1000
+        timestamp = self.safe_timestamp(order, 'created_at')
         marketId = self.safe_string(order, 'product_id')
         market = self.safe_value(self.markets_by_id, marketId)
         status = self.parse_order_status(self.safe_string(order, 'status'))
@@ -493,39 +596,52 @@ class liquid (Exchange):
         if market is not None:
             symbol = market['symbol']
             feeCurrency = market['quote']
-        type = order['order_type']
-        executedQuantity = 0
-        totalValue = 0
-        averagePrice = self.safe_float(order, 'average_price')
-        trades = None
-        if 'executions' in order:
-            trades = self.parse_trades(self.safe_value(order, 'executions', []), market)
-            numTrades = len(trades)
-            for i in range(0, numTrades):
-                # php copies values upon assignment, but not references them
-                # todo rewrite self(shortly)
-                trade = trades[i]
-                trade['order'] = orderId
-                trade['type'] = type
-                executedQuantity += trade['amount']
-                totalValue += trade['cost']
-            if not averagePrice and(numTrades > 0) and(executedQuantity > 0):
-                averagePrice = totalValue / executedQuantity
-        cost = filled * averagePrice
+        type = self.safe_string(order, 'order_type')
+        tradeCost = 0
+        tradeFilled = 0
+        average = self.safe_float(order, 'average_price')
+        trades = self.parse_trades(self.safe_value(order, 'executions', []), market, None, None, {
+            'order': orderId,
+            'type': type,
+        })
+        numTrades = len(trades)
+        for i in range(0, numTrades):
+            # php copies values upon assignment, but not references them
+            # todo rewrite self(shortly)
+            trade = trades[i]
+            trade['order'] = orderId
+            trade['type'] = type
+            tradeFilled = self.sum(tradeFilled, trade['amount'])
+            tradeCost = self.sum(tradeCost, trade['cost'])
+        cost = None
+        lastTradeTimestamp = None
+        if numTrades > 0:
+            lastTradeTimestamp = trades[numTrades - 1]['timestamp']
+            if not average and(tradeFilled > 0):
+                average = tradeCost / tradeFilled
+            if cost is None:
+                cost = tradeCost
+            if filled is None:
+                filled = tradeFilled
+        remaining = None
+        if amount is not None and filled is not None:
+            remaining = amount - filled
+        side = self.safe_string(order, 'side')
         return {
             'id': orderId,
             'timestamp': timestamp,
             'datetime': self.iso8601(timestamp),
-            'lastTradeTimestamp': None,
+            'lastTradeTimestamp': lastTradeTimestamp,
             'type': type,
             'status': status,
             'symbol': symbol,
-            'side': order['side'],
+            'side': side,
             'price': price,
             'amount': amount,
             'filled': filled,
             'cost': cost,
-            'remaining': amount - filled,
+            'remaining': remaining,
+            'average': average,
             'trades': trades,
             'fee': {
                 'currency': feeCurrency,
@@ -536,38 +652,67 @@ class liquid (Exchange):
 
     def fetch_order(self, id, symbol=None, params={}):
         self.load_markets()
-        order = self.privateGetOrdersId(self.extend({
+        request = {
             'id': id,
-        }, params))
-        return self.parse_order(order)
+        }
+        response = self.privateGetOrdersId(self.extend(request, params))
+        return self.parse_order(response)
 
     def fetch_orders(self, symbol=None, since=None, limit=None, params={}):
         self.load_markets()
         market = None
-        request = {}
+        request = {
+            # 'funding_currency': market['quoteId'],  # filter orders based on "funding" currency(quote currency)
+            # 'product_id': market['id'],
+            # 'status': 'live',  # 'filled', 'cancelled'
+            # 'trading_type': 'spot',  # 'margin', 'cfd'
+            'with_details': 1,  # return full order details including executions
+        }
         if symbol is not None:
             market = self.market(symbol)
             request['product_id'] = market['id']
-        status = self.safe_value(params, 'status')
-        if status:
-            params = self.omit(params, 'status')
-            if status == 'open':
-                request['status'] = 'live'
-            elif status == 'closed':
-                request['status'] = 'filled'
-            elif status == 'canceled':
-                request['status'] = 'cancelled'
         if limit is not None:
             request['limit'] = limit
-        result = self.privateGetOrders(self.extend(request, params))
-        orders = result['models']
+        response = self.privateGetOrders(self.extend(request, params))
+        #
+        #     {
+        #         "models": [
+        #             {
+        #                 "id": 2157474,
+        #                 "order_type": "limit",
+        #                 "quantity": "0.01",
+        #                 "disc_quantity": "0.0",
+        #                 "iceberg_total_quantity": "0.0",
+        #                 "side": "sell",
+        #                 "filled_quantity": "0.0",
+        #                 "price": "500.0",
+        #                 "created_at": 1462123639,
+        #                 "updated_at": 1462123639,
+        #                 "status": "live",
+        #                 "leverage_level": 1,
+        #                 "source_exchange": "QUOINE",
+        #                 "product_id": 1,
+        #                 "product_code": "CASH",
+        #                 "funding_currency": "USD",
+        #                 "currency_pair_code": "BTCUSD",
+        #                 "order_fee": "0.0",
+        #                 "executions": [],  # optional
+        #             }
+        #         ],
+        #         "current_page": 1,
+        #         "total_pages": 1
+        #     }
+        #
+        orders = self.safe_value(response, 'models', [])
         return self.parse_orders(orders, market, since, limit)
 
     def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
-        return self.fetch_orders(symbol, since, limit, self.extend({'status': 'open'}, params))
+        request = {'status': 'live'}
+        return self.fetch_orders(symbol, since, limit, self.extend(request, params))
 
     def fetch_closed_orders(self, symbol=None, since=None, limit=None, params={}):
-        return self.fetch_orders(symbol, since, limit, self.extend({'status': 'closed'}, params))
+        request = {'status': 'filled'}
+        return self.fetch_orders(symbol, since, limit, self.extend(request, params))
 
     def nonce(self):
         return self.milliseconds()
@@ -593,14 +738,14 @@ class liquid (Exchange):
                 'token_id': self.apiKey,
                 'iat': int(math.floor(nonce / 1000)),  # issued at
             }
-            headers['X-Quoine-Auth'] = self.jwt(request, self.secret)
+            headers['X-Quoine-Auth'] = self.jwt(request, self.encode(self.secret))
         else:
             if query:
                 url += '?' + self.urlencode(query)
         url = self.urls['api'] + url
         return {'url': url, 'method': method, 'body': body, 'headers': headers}
 
-    def handle_errors(self, code, reason, url, method, headers, body, response):
+    def handle_errors(self, code, reason, url, method, headers, body, response, requestHeaders, requestBody):
         if code >= 200 and code < 300:
             return
         exceptions = self.exceptions
@@ -639,3 +784,132 @@ class liquid (Exchange):
                         raise exceptions[message](feedback)
         else:
             raise ExchangeError(feedback)
+
+    def _websocket_on_message(self, contextId, data):
+        msg = json.loads(data)
+        # print(data)
+        evt = self.safe_string(msg, 'event')
+        if evt == 'subscription_succeeded':
+            self._websocket_handle_subscription(contextId, msg)
+        elif evt == 'updated':
+            chan = self.safe_string(msg, 'channel')
+            if chan.find('price_ladders_cash_') >= 0:
+                self._websocket_handle_orderbook(contextId, msg)
+
+    def _websocket_handle_orderbook(self, contextId, msg):
+        chan = self.safe_string(msg, 'channel')
+        parts = chan.split('_')
+        symbol = parts[3]
+        symbolMap = self._contextGet(contextId, 'symbolmap')
+        if symbol in symbolMap:
+            symbol = symbolMap[symbol]
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if not('ob' in list(symbolData.keys())):
+            symbolData['ob'] = {
+                'nonce': None,
+                'timestamp': None,
+                'datetime': None,
+                'bids': [],
+                'asks': [],
+            }
+        data = self.safe_value(msg, 'data')
+        if parts[4] == 'buy':
+            symbolData['ob']['bids'] = data
+        else:
+            symbolData['ob']['asks'] = data
+        self.emit('ob', symbol, self._cloneOrderBook(symbolData['ob'], symbolData['limit']))
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+
+    def _websocket_handle_subscription(self, contextId, msg):
+        chan = self.safe_string(msg, 'channel')
+        if chan.find('price_ladders_cash_') >= 0:
+            parts = chan.split('_')
+            symbol = parts[3]
+            symbolMap = self._contextGet(contextId, 'symbolmap')
+            if symbol in symbolMap:
+                symbol = symbolMap[symbol]
+            buyOrSell = 'buy_sub' if (parts[4] == 'buy') else 'sell_sub'
+            symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+            if 'sub-nonces' in symbolData:
+                nonces = symbolData['sub-nonces']
+                keys = list(nonces.keys())
+                for i in range(0, len(keys)):
+                    nonce = keys[i]
+                    nonces[nonce][buyOrSell] = True
+                    if (nonces[nonce]['buy_sub']) and(nonces[nonce]['sell_sub']):
+                        self._cancelTimeout(nonces[nonce]['handle'])
+                        self.emit(nonce, True)
+                        self.omit(symbolData['sub-nonces'], nonce)
+                symbolData['sub-nonces'] = nonces
+                self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+
+    def _websocket_on_open(self, contextId, websocketOptions):
+        symbolMap = {}
+        self._contextSet(contextId, 'symbolmap', symbolMap)
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        # save nonce for subscription response
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if not('sub-nonces' in list(symbolData.keys())):
+            symbolData['sub-nonces'] = {}
+        symbolData['limit'] = self.safe_integer(params, 'limit', None)
+        nonceStr = str(nonce)
+        handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce'])
+        symbolData['sub-nonces'][nonceStr] = {
+            'handle': handle,
+            'buy_sub': False,
+            'sell_sub': False,
+        }
+        self._contextSetSymbolData(contextId, event, symbol, symbolData)
+        # send request
+        id = self._websocket_market_id(symbol)
+        symbolMap = self._contextGet(contextId, 'symbolmap')
+        symbolMap[id] = symbol
+        self._contextSet(contextId, 'symbolmap', symbolMap)
+        self.websocketSendJson({
+            'event': 'subscribe',
+            'channel': 'price_ladders_cash_' + id + '_buy',
+        }, contextId)
+        self.websocketSendJson({
+            'event': 'subscribe',
+            'channel': 'price_ladders_cash_' + id + '_sell',
+        }, contextId)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob':
+            raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        id = self._websocket_market_id(symbol)
+        self.websocketSendJson({
+            'event': 'unsubscribe',
+            'channel': 'price_ladders_cash_' + id + '_buy',
+        })
+        self.websocketSendJson({
+            'event': 'unsubscribe',
+            'channel': 'price_ladders_cash_' + id + '_sell',
+        })
+        nonceStr = str(nonce)
+        self.emit(nonceStr, True)
+
+    def _websocket_timeout_remove_nonce(self, contextId, timerNonce, event, symbol, key):
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if key in symbolData:
+            nonces = symbolData[key]
+            if timerNonce in nonces:
+                self.omit(symbolData[key], timerNonce)
+                self._contextSetSymbolData(contextId, event, symbol, symbolData)
+
+    def _websocket_market_id(self, symbol):
+        market = self.find_market(symbol)
+        if market is not None:
+            baseId = market['baseId'].lower()
+            quoteId = market['quoteId'].lower()
+            return baseId + quoteId
+        return symbol
+
+    def _get_current_websocket_orderbook(self, contextId, symbol, limit):
+        data = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+            return self._cloneOrderBook(data['ob'], limit)
+        return None
