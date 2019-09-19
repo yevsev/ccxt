@@ -1356,7 +1356,7 @@ module.exports = class bitmex extends Exchange {
         if (sequenceStr in pongTimers) {
             let timer = pongTimers[sequenceStr];
             this._cancelTimeout (timer);
-            this.omit (timer, pongTimers);
+            this.omit (pongTimers, timer);
             this._contextSet (contextId, 'pongtimers', pongTimers);
         }
         this._websocketRestartPingTimer (contextId);
@@ -1374,7 +1374,7 @@ module.exports = class bitmex extends Exchange {
         this._contextSet (contextId, 'pingseq', lastSeq);
         this.websocketSendPing (lastSeq);
         let pongTimers = this._contextGet (contextId, 'pongtimers');
-        if (typeof pongTimer === 'undefined') {
+        if (typeof pongTimers === 'undefined') {
             pongTimers = [];
         }
         let newPongTimer = this._setTimeout (contextId, 5000, this._websocketMethodMap ('_websocketTimeoutPong'), [contextId, lastSeq]);

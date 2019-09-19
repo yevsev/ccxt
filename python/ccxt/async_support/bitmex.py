@@ -1256,7 +1256,7 @@ class bitmex (Exchange):
         if sequenceStr in pongTimers:
             timer = pongTimers[sequenceStr]
             self._cancelTimeout(timer)
-            self.omit(timer, pongTimers)
+            self.omit(pongTimers, timer)
             self._contextSet(contextId, 'pongtimers', pongTimers)
         self._websocket_restart_ping_timer(contextId)
 
@@ -1271,7 +1271,7 @@ class bitmex (Exchange):
         self._contextSet(contextId, 'pingseq', lastSeq)
         self.websocketSendPing(lastSeq)
         pongTimers = self._contextGet(contextId, 'pongtimers')
-        if pongTimer is None:
+        if pongTimers is None:
             pongTimers = []
         newPongTimer = self._setTimeout(contextId, 5000, self._websocketMethodMap('_websocketTimeoutPong'), [contextId, lastSeq])
         pongTimers[sequenceStr] = newPongTimer
