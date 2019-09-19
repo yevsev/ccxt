@@ -1451,8 +1451,8 @@ module.exports = class binance extends Exchange {
                     this.websocketClose (contextId);
                 } else {
                     // Launch again
-                    delete symbolData['ob'];
-                    delete symbolData['deltas'];
+                    symbolData = this.omit (symbolData, 'ob');
+                    symbolData = this.omit (symbolData, 'deltas');
                 }
                 this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
             } else {

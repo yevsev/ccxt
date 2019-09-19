@@ -1324,8 +1324,8 @@ class binance (Exchange):
                     self.websocketClose(contextId)
                 else:
                     # Launch again
-                    del symbolData['ob']
-                    del symbolData['deltas']
+                    symbolData = self.omit(symbolData, 'ob')
+                    symbolData = self.omit(symbolData, 'deltas')
                 self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
             else:
                 symbolData['deltas'].append(data)

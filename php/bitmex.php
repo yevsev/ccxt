@@ -1475,7 +1475,8 @@ class bitmex extends Exchange {
 
     public function _websocket_handle_trade ($contextId, $msg) {
         $data = $this->safe_value($msg, 'data');
-        if ($data === null || strlen ($data) === 0) {
+        $dataLength = is_array ($data) ? count ($data) : 0;
+        if ($data === null || dataLenght === 0) {
             return;
         }
         $symbol = $this->safe_string($data[0], 'symbol');
