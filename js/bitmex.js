@@ -1475,8 +1475,8 @@ module.exports = class bitmex extends Exchange {
 
     _websocketHandleTrade (contextId, msg) {
         let data = this.safeValue (msg, 'data');
-        let dataLenght = data.length;
-        if (typeof data === 'undefined' || dataLenght === 0) {
+        let dataLength = data.length;
+        if (typeof data === 'undefined' || dataLength === 0) {
             return;
         }
         let symbol = this.safeString (data[0], 'symbol');

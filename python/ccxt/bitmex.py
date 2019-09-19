@@ -1353,7 +1353,7 @@ class bitmex (Exchange):
     def _websocket_handle_trade(self, contextId, msg):
         data = self.safe_value(msg, 'data')
         dataLength = len(data)
-        if data is None or dataLenght == 0:
+        if data is None or dataLength == 0:
             return
         symbol = self.safe_string(data[0], 'symbol')
         trades = self.parse_trades(data)
