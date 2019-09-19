@@ -1356,7 +1356,7 @@ class bitmex extends Exchange {
         if (is_array($pongTimers) && array_key_exists($sequenceStr, $pongTimers)) {
             $timer = $pongTimers[$sequenceStr];
             $this->_cancelTimeout ($timer);
-            $this->omit ($pongTimers, $timer);
+            $this->omit ($pongTimers, $sequenceStr);
             $this->_contextSet ($contextId, 'pongtimers', $pongTimers);
         }
         $this->_websocket_restart_ping_timer ($contextId);

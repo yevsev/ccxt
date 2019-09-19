@@ -1256,7 +1256,7 @@ class bitmex (Exchange):
         if sequenceStr in pongTimers:
             timer = pongTimers[sequenceStr]
             self._cancelTimeout(timer)
-            self.omit(pongTimers, timer)
+            self.omit(pongTimers, sequenceStr)
             self._contextSet(contextId, 'pongtimers', pongTimers)
         self._websocket_restart_ping_timer(contextId)
 
