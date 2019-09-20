@@ -3144,7 +3144,7 @@ abstract class Exchange extends CcxtEventEmitter {
                 if ($conx != null) {
                     $conx->close();
                 }
-                if (!delayed){
+                if (!$delayed){
                     if ($action['reset-context'] === 'onreconnect') {
                         // $this->_websocket_reset_context($conxid);
                         $this->_contextResetSymbol($conxid, $event, $symbol);
