@@ -1315,7 +1315,7 @@ module.exports = class bitmex extends Exchange {
 
     _websocketOnOpen (contextId, websocketOptions) { // eslint-disable-line no-unused-vars
         this._websocketRestartPingTimer (contextId);
-        let dbids = {};
+        const dbids = {};
         this._contextSet (contextId, 'dbids', dbids);
         // send auth
         // let nonce = this.nonce ();
@@ -1329,11 +1329,11 @@ module.exports = class bitmex extends Exchange {
 
     _websocketOnMessage (contextId, data) {
         this._websocketRestartPingTimer (contextId);
-        let msg = JSON.parse (data);
-        let table = this.safeString (msg, 'table');
-        let subscribe = this.safeString (msg, 'subscribe');
-        let unsubscribe = this.safeString (msg, 'unsubscribe');
-        let status = this.safeInteger (msg, 'status');
+        const msg = JSON.parse (data);
+        const table = this.safeString (msg, 'table');
+        const subscribe = this.safeString (msg, 'subscribe');
+        const unsubscribe = this.safeString (msg, 'unsubscribe');
+        const status = this.safeInteger (msg, 'status');
         if (typeof subscribe !== 'undefined') {
             this._websocketHandleSubscription (contextId, msg);
         } else if (typeof unsubscribe !== 'undefined') {
@@ -1350,11 +1350,11 @@ module.exports = class bitmex extends Exchange {
     }
 
     _websocketOnPong (contextId, sequence) {
-        console.log ("PONG " + sequence);
-        let sequenceStr = '_' + sequence.toString ();
-        let pongTimers = this._contextGet (contextId, 'pongtimers');
+        console.log ('PONG ' + sequence);
+        const sequenceStr = '_' + sequence.toString ();
+        const pongTimers = this._contextGet (contextId, 'pongtimers');
         if (sequenceStr in pongTimers) {
-            let timer = pongTimers[sequenceStr];
+            const timer = pongTimers[sequenceStr];
             this._cancelTimeout (timer);
             this.omit (pongTimers, sequenceStr);
             this._contextSet (contextId, 'pongtimers', pongTimers);
@@ -1364,31 +1364,31 @@ module.exports = class bitmex extends Exchange {
 
     _websocketTimeoutSendPing (contextId) {
         let lastSeq = this._contextGet (contextId, 'pingseq');
-        if (typeof lastSeq === 'undefined'){
+        if (typeof lastSeq === 'undefined') {
             lastSeq = 1;
         } else {
             lastSeq = lastSeq + 1;
         }
-        let sequenceStr = '_' + lastSeq.toString ();
-        console.log ("PING " + lastSeq);
+        const sequenceStr = '_' + lastSeq.toString ();
+        console.log ('PING ' + lastSeq);
         this._contextSet (contextId, 'pingseq', lastSeq);
         this.websocketSendPing (lastSeq);
         let pongTimers = this._contextGet (contextId, 'pongtimers');
         if (typeof pongTimers === 'undefined') {
             pongTimers = [];
         }
-        let newPongTimer = this._setTimeout (contextId, 5000, this._websocketMethodMap ('_websocketTimeoutPong'), [contextId, lastSeq]);
+        const newPongTimer = this._setTimeout (contextId, 5000, this._websocketMethodMap ('_websocketTimeoutPong'), [contextId, lastSeq]);
         pongTimers[sequenceStr] = newPongTimer;
         this._contextSet (contextId, 'pongtimers', pongTimers);
     }
 
-    _websocketTimeoutPong (contextId, sequence){
-        this.emit ('err', new ExchangeError (this.id + ' no pong received for '+ sequence));
+    _websocketTimeoutPong (contextId, sequence) {
+        this.emit ('err', new ExchangeError (this.id + ' no pong received for ' + sequence));
     }
 
     _websocketHandleError (contextId, msg) {
-        let status = this.safeInteger (msg, 'status');
-        let error = this.safeString (msg, 'error');
+        const status = this.safeInteger (msg, 'status');
+        const error = this.safeString (msg, 'error');
         this.emit ('err', new ExchangeError (this.id + ' status ' + status + ':' + error), contextId);
     }
 
@@ -1403,10 +1403,10 @@ module.exports = class bitmex extends Exchange {
     }
 
     _websocketHandleSubscription (contextId, msg) {
-        let success = this.safeValue (msg, 'success');
-        let subscribe = this.safeString (msg, 'subscribe');
-        let parts = subscribe.split (':');
-        let partsLen = parts.length;
+        const success = this.safeValue (msg, 'success');
+        const subscribe = this.safeString (msg, 'subscribe');
+        const parts = subscribe.split (':');
+        const partsLen = parts.length;
         let event = undefined;
         if (partsLen === 2) {
             if (parts[0] === 'orderBookL2') {
@@ -1417,13 +1417,13 @@ module.exports = class bitmex extends Exchange {
                 event = undefined;
             }
             if (typeof event !== 'undefined') {
-                let symbol = this.findSymbol (parts[1]);
-                let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+                const symbol = this.findSymbol (parts[1]);
+                const symbolData = this._contextGetSymbolData (contextId, event, symbol);
                 if ('sub-nonces' in symbolData) {
-                    let nonces = symbolData['sub-nonces'];
+                    const nonces = symbolData['sub-nonces'];
                     const keys = Object.keys (nonces);
                     for (let i = 0; i < keys.length; i++) {
-                        let nonce = keys[i];
+                        const nonce = keys[i];
                         this._cancelTimeout (nonces[nonce]);
                         this.emit (nonce, success);
                     }
@@ -1435,10 +1435,10 @@ module.exports = class bitmex extends Exchange {
     }
 
     _websocketHandleUnsubscription (contextId, msg) {
-        let success = this.safeValue (msg, 'success');
-        let unsubscribe = this.safeString (msg, 'unsubscribe');
-        let parts = unsubscribe.split (':');
-        let partsLen = parts.length;
+        const success = this.safeValue (msg, 'success');
+        const unsubscribe = this.safeString (msg, 'unsubscribe');
+        const parts = unsubscribe.split (':');
+        const partsLen = parts.length;
         let event = undefined;
         if (partsLen === 2) {
             if (parts[0] === 'orderBookL2') {
@@ -1449,20 +1449,20 @@ module.exports = class bitmex extends Exchange {
                 event = undefined;
             }
             if (typeof event !== 'undefined') {
-                let symbol = this.findSymbol (parts[1]);
+                const symbol = this.findSymbol (parts[1]);
                 if (success && event === 'ob') {
-                    let dbids = this._contextGet (contextId, 'dbids');
+                    const dbids = this._contextGet (contextId, 'dbids');
                     if (symbol in dbids) {
                         this.omit (dbids, symbol);
                         this._contextSet (contextId, 'dbids', dbids);
                     }
                 }
-                let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+                const symbolData = this._contextGetSymbolData (contextId, event, symbol);
                 if ('unsub-nonces' in symbolData) {
-                    let nonces = symbolData['unsub-nonces'];
+                    const nonces = symbolData['unsub-nonces'];
                     const keys = Object.keys (nonces);
                     for (let i = 0; i < keys.length; i++) {
-                        let nonce = keys[i];
+                        const nonce = keys[i];
                         this._cancelTimeout (nonces[nonce]);
                         this.emit (nonce, success);
                     }
@@ -1474,13 +1474,13 @@ module.exports = class bitmex extends Exchange {
     }
 
     _websocketHandleTrade (contextId, msg) {
-        let data = this.safeValue (msg, 'data');
-        let dataLength = data.length;
+        const data = this.safeValue (msg, 'data');
+        const dataLength = data.length;
         if (typeof data === 'undefined' || dataLength === 0) {
             return;
         }
         let symbol = this.safeString (data[0], 'symbol');
-        let trades = this.parseTrades (data);
+        const trades = this.parseTrades (data);
         symbol = this.findSymbol (symbol);
         for (let t = 0; t < trades.length; t++) {
             this.emit ('trade', symbol, trades[t]);
@@ -1488,27 +1488,27 @@ module.exports = class bitmex extends Exchange {
     }
 
     _websocketHandleOb (contextId, msg) {
-        let action = this.safeString (msg, 'action');
-        let data = this.safeValue (msg, 'data');
+        const action = this.safeString (msg, 'action');
+        const data = this.safeValue (msg, 'data');
         let symbol = this.safeString (data[0], 'symbol');
-        let dbids = this._contextGet (contextId, 'dbids');
+        const dbids = this._contextGet (contextId, 'dbids');
         symbol = this.findSymbol (symbol);
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (action === 'partial') {
-            let ob = {
+            const ob = {
                 'bids': [],
                 'asks': [],
                 'timestamp': undefined,
                 'datetime': undefined,
                 'nonce': undefined,
             };
-            let obIds = {};
+            const obIds = {};
             for (let o = 0; o < data.length; o++) {
-                let order = data[o];
-                let side = (order['side'] === 'Sell') ? 'asks' : 'bids';
-                let amount = order['size'];
-                let price = order['price'];
-                let priceId = order['id'];
+                const order = data[o];
+                const side = (order['side'] === 'Sell') ? 'asks' : 'bids';
+                const amount = order['size'];
+                const price = order['price'];
+                const priceId = order['id'];
                 ob[side].push ([ price, amount ]);
                 obIds[priceId] = price;
             }
@@ -1519,14 +1519,14 @@ module.exports = class bitmex extends Exchange {
             this.emit ('ob', symbol, this._cloneOrderBook (ob, symbolData['limit']));
         } else if (action === 'update') {
             if (symbol in dbids) {
-                let obIds = dbids[symbol];
-                let curob = symbolData['ob'];
+                const obIds = dbids[symbol];
+                const curob = symbolData['ob'];
                 for (let o = 0; o < data.length; o++) {
-                    let order = data[o];
-                    let amount = order['size'];
-                    let side = (order['side'] === 'Sell') ? 'asks' : 'bids';
-                    let priceId = order['id'];
-                    let price = obIds[priceId];
+                    const order = data[o];
+                    const amount = order['size'];
+                    const side = (order['side'] === 'Sell') ? 'asks' : 'bids';
+                    const priceId = order['id'];
+                    const price = obIds[priceId];
                     this.updateBidAsk ([price, amount], curob[side], order['side'] === 'Buy');
                 }
                 symbolData['ob'] = curob;
@@ -1534,13 +1534,13 @@ module.exports = class bitmex extends Exchange {
             }
         } else if (action === 'insert') {
             if (symbol in dbids) {
-                let curob = symbolData['ob'];
+                const curob = symbolData['ob'];
                 for (let o = 0; o < data.length; o++) {
-                    let order = data[o];
-                    let amount = order['size'];
-                    let side = (order['side'] === 'Sell') ? 'asks' : 'bids';
-                    let priceId = order['id'];
-                    let price = order['price'];
+                    const order = data[o];
+                    const amount = order['size'];
+                    const side = (order['side'] === 'Sell') ? 'asks' : 'bids';
+                    const priceId = order['id'];
+                    const price = order['price'];
                     this.updateBidAsk ([price, amount], curob[side], order['side'] === 'Buy');
                     dbids[symbol][priceId] = price;
                 }
@@ -1549,13 +1549,13 @@ module.exports = class bitmex extends Exchange {
             }
         } else if (action === 'delete') {
             if (symbol in dbids) {
-                let obIds = dbids[symbol];
-                let curob = symbolData['ob'];
+                const obIds = dbids[symbol];
+                const curob = symbolData['ob'];
                 for (let o = 0; o < data.length; o++) {
-                    let order = data[o];
-                    let side = (order['side'] === 'Sell') ? 'asks' : 'bids';
-                    let priceId = order['id'];
-                    let price = obIds[priceId];
+                    const order = data[o];
+                    const side = (order['side'] === 'Sell') ? 'asks' : 'bids';
+                    const priceId = order['id'];
+                    const price = obIds[priceId];
                     this.updateBidAsk ([price, 0], curob[side], order['side'] === 'Buy');
                     this.omit (dbids[symbol], priceId);
                 }
@@ -1573,7 +1573,7 @@ module.exports = class bitmex extends Exchange {
         if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let id = this.market_id (symbol).toUpperCase ();
+        const id = this.market_id (symbol).toUpperCase ();
         let payload = undefined;
         if (event === 'ob') {
             payload = {
@@ -1586,13 +1586,13 @@ module.exports = class bitmex extends Exchange {
                 'args': ['trade:' + id],
             };
         }
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (!('sub-nonces' in symbolData)) {
             symbolData['sub-nonces'] = {};
         }
         symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
         symbolData['sub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         this.websocketSendJson (payload);
@@ -1602,7 +1602,7 @@ module.exports = class bitmex extends Exchange {
         if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let id = this.market_id (symbol).toUpperCase ();
+        const id = this.market_id (symbol).toUpperCase ();
         let payload = undefined;
         if (event === 'ob') {
             payload = {
@@ -1615,21 +1615,21 @@ module.exports = class bitmex extends Exchange {
                 'args': ['trade:' + id],
             };
         }
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (!('unsub-nonces' in symbolData)) {
             symbolData['unsub-nonces'] = {};
         }
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
         symbolData['unsub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         this.websocketSendJson (payload);
     }
 
     _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (key in symbolData) {
-            let nonces = symbolData[key];
+            const nonces = symbolData[key];
             if (timerNonce in nonces) {
                 this.omit (symbolData[key], timerNonce);
                 this._contextSetSymbolData (contextId, event, symbol, symbolData);
@@ -1638,7 +1638,7 @@ module.exports = class bitmex extends Exchange {
     }
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
             return this._cloneOrderBook (data['ob'], limit);
         }

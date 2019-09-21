@@ -1292,7 +1292,7 @@ class poloniex (Exchange):
             # both 'ob' and 'trade' are handled by the same execution branch
             # as on poloniex they are part of the same endpoint
             symbol = symbolsIds[channelIdStr]
-            self._websocketHandleOb(contextId, symbol, msg)
+            self._websocket_handle_ob(contextId, symbol, msg)
         elif channelIdStr == '1000':
             # Private Channel
             self._websocket_handle_orders(contextId, msg)
@@ -1330,7 +1330,7 @@ class poloniex (Exchange):
             od['od'] = {}
         if data[1] == 1:
             self.emit('od', self._cloneOrders(od['od']))
-            return 
+            return
         datareceived = data[2]
         for i in range(0, len(datareceived)):
             msg = datareceived[i]
@@ -1359,13 +1359,13 @@ class poloniex (Exchange):
                 orderid = order['id']
                 od['od'][orderid] = order
             elif msg[0] == 'o':
-                order = self._websocketReturnOrder(od['od'],msg[1],msg)
+                order = self._websocket_return_order(od['od'], msg[1], msg)
                 order['remaining'] = float(msg[2])
                 if float(order['remaining']) == 0:
                     order['status'] = 'closed'
                 od['od'][msg[1]] = order
             elif msg[0] == 't':
-                order = self._websocketReturnOrder(od['od'],msg[6],msg)
+                order = self._websocket_return_order(od['od'], msg[6], msg)
                 trade = self._websocket_parse_trade(msg, order['symbol'])
                 order['filled'] = float(order['filled']) + float(msg[3])
                 order['cost'] = float(order['cost']) + float(msg[7])
@@ -1375,9 +1375,10 @@ class poloniex (Exchange):
                 self.emit('err', ExchangeError('Message Type ' + msg[0] + ' is not handle at the moment'))
         self._contextSetSymbolData(contextId, 'od', 'all', od)
         self.emit('od', self._cloneOrders(od['od']))
-    _websocketReturnOrder(orders,orderId,msg) {
-        #Return the order if it exist or a dummy order to keep track of what we receive
-        if (orders[orderId] is not None){
+
+    def _websocket_return_order(self, orders, orderId, msg):
+        # Return the order if it exist or a dummy order to keep track of what we receive
+        if orders[orderId] is not None:
             return orders[orderId]
         else:
             return {
@@ -1387,8 +1388,10 @@ class poloniex (Exchange):
                 'filled': 0.0,
                 'cost': 0.0,
                 'trades': [],
-                'info': msg
-    _websocketHandleOb(contextId, symbol, data) {
+                'info': msg,
+            }
+
+    def _websocket_handle_ob(self, contextId, symbol, data):
         # Poloniex calls self Price Aggregated Book
         # channelId = data[0]
         sequenceNumber = data[1]
@@ -1534,7 +1537,7 @@ class poloniex (Exchange):
         if not self._contextIsSubscribed(contextId, 'trade', symbol):
             market = self.find_market(symbol)
             symbolsIds = self._contextGet(contextId, 'symbolids')
-            if (symbolsIds is None){
+            if symbolsIds is None:
                 symbolsIds = {}
             symbolsIds[market['id2']] = symbol
             self._contextSet(contextId, 'symbolids', symbolsIds)

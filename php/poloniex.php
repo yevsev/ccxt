@@ -1411,7 +1411,7 @@ class poloniex extends Exchange {
             // both 'ob' and 'trade' are handled by the same execution branch
             // as on poloniex they are part of the same endpoint
             $symbol = $symbolsIds[$channelIdStr];
-            $this->_websocketHandleOb ($contextId, $symbol, $msg);
+            $this->_websocket_handle_ob ($contextId, $symbol, $msg);
         } else if ($channelIdStr === '1000') {
             // Private Channel
             $this->_websocket_handle_orders ($contextId, $msg);
@@ -1453,7 +1453,7 @@ class poloniex extends Exchange {
         }
         if ($data[1] === 1) {
             $this->emit ('od', $this->_cloneOrders ($od['od']));
-            return 
+            return;
         }
         $datareceived = $data[2];
         for ($i = 0; $i < count ($datareceived); $i++) {
@@ -1461,7 +1461,7 @@ class poloniex extends Exchange {
             if ($msg[0] === 'b') {
                 // Balance Update ==> Not use at the moment
             } else if ($msg[0] === 'n') {
-                // New Order : ["n", <currency pair id>, <t $order number>, <$order type>, "{rate}", "{$amount}", "{date}"]
+                // New Order : ["n", <currency pair id>, <t $order number>, <$order type>, "{rate}", "{amount}", "{date}"]
                 $side = ($msg[3] === 1) ? 'buy' : 'sell';
                 $timestamp = $msg[6] * 1000;
                 $order = array (
@@ -1483,17 +1483,17 @@ class poloniex extends Exchange {
                 $orderid = $order['id'];
                 $od['od'][$orderid] = $order;
             } else if ($msg[0] === 'o') {
-                $order = $this->_websocketReturnOrder ($od['od'],$msg[1],$msg);
+                $order = $this->_websocket_return_order ($od['od'], $msg[1], $msg);
                 $order['remaining'] = floatval ($msg[2]);
                 if (floatval ($order['remaining']) === 0) {
                     $order['status'] = 'closed';
                 }
                 $od['od'][$msg[1]] = $order;
             } else if ($msg[0] === 't') {
-                $order = $this->_websocketReturnOrder ($od['od'],$msg[6],$msg);
+                $order = $this->_websocket_return_order ($od['od'], $msg[6], $msg);
                 $trade = $this->_websocket_parse_trade ($msg, $order['symbol']);
-                $order['filled'] = floatval ($order['filled']) . parseFloat($msg[3]);
-                $order['cost'] = floatval ($order['cost']) . parseFloat($msg[7]);
+                $order['filled'] = floatval ($order['filled']) . floatval ($msg[3]);
+                $order['cost'] = floatval ($order['cost']) . floatval ($msg[7]);
                 $order['trades'][] = $trade;
                 $od['od'][$msg[6]] = $order;
             } else {
@@ -1503,23 +1503,25 @@ class poloniex extends Exchange {
         $this->_contextSetSymbolData ($contextId, 'od', 'all', $od);
         $this->emit ('od', $this->_cloneOrders ($od['od']));
     }
-    _websocketReturnOrder (orders,orderId,$msg) {
-        //Return the $order if it exist or a dummy $order to keep track of what we receive
-        if (orders[orderId] !== null){
-            return orders[orderId]
+
+    public function _websocket_return_order ($orders, $orderId, $msg) {
+        // Return the order if it exist or a dummy order to keep track of what we receive
+        if ($orders[$orderId] !== null) {
+            return $orders[$orderId];
         } else {
-            return {
-                'id' => orderId,
+            return array (
+                'id' => $orderId,
                 'status' => 'open',
                 'remaining' => 0.0,
                 'filled' => 0.0,
                 'cost' => 0.0,
                 'trades' => array(),
-                'info' => $msg
-            }
+                'info' => $msg,
+            );
         }
     }
-    _websocketHandleOb ($contextId, $symbol, $data) {
+
+    public function _websocket_handle_ob ($contextId, $symbol, $data) {
         // Poloniex calls this Price Aggregated Book
         // $channelId = $data[0];
         $sequenceNumber = $data[1];
@@ -1682,8 +1684,8 @@ class poloniex extends Exchange {
         if (!$this->_contextIsSubscribed ($contextId, 'trade', $symbol)) {
             $market = $this->find_market($symbol);
             $symbolsIds = $this->_contextGet ($contextId, 'symbolids');
-            if($symbolsIds === null){
-                $symbolsIds = array()
+            if ($symbolsIds === null) {
+                $symbolsIds = array();
             }
             $symbolsIds[$market['id2']] = $symbol;
             $this->_contextSet ($contextId, 'symbolids', $symbolsIds);

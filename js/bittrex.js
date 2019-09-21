@@ -1358,9 +1358,10 @@ module.exports = class bittrex extends Exchange {
         if (body[0] === '{') {
             response = JSON.parse (body);
             // {"Url":"/signalr","ConnectionToken":"...","ConnectionId":"...","KeepAliveTimeout":20.0,"DisconnectTimeout":30.0,"ConnectionTimeout":110.0,"TryWebSockets":true,"ProtocolVersion":"1.5","TransportConnectTimeout":5.0,"LongPollDelay":0.0}
-            let responseUrl = this.safeValue (response, 'Url');
-            if (responseUrl !== undefined)
+            const responseUrl = this.safeValue (response, 'Url');
+            if (responseUrl !== undefined) {
                 return response;
+            }
             // { success: false, message: "message" }
             let success = this.safeValue (response, 'success');
             if (success === undefined) {
@@ -1445,7 +1446,7 @@ module.exports = class bittrex extends Exchange {
 
     async _websocketOnInit (contextId, websocketConfig) {
         const connectionData = [{ 'name': 'c2' }];
-        let response = await this.socketGetNegotiate ({
+        const response = await this.socketGetNegotiate ({
             'clientProtocol': '1.5',
             'connectionData': this.json (connectionData),
             '_': this.milliseconds (),
@@ -1465,18 +1466,18 @@ module.exports = class bittrex extends Exchange {
         // WebsocketConnection: {"C":"d-30A89C0B-B2bAF,2|Dj,DCF8E","M":[{"H":"C2","M":"uE","A":["bc4xDsIwDIXhu7w5WHYSN3ZGYAUJWgZAXblE1bu3QlUFBW+WPv32gBMqbu2x2+27AwLOqM4qnAMeqM8B3R1VAq6oSZNTEebYGAdcUJl4DBvC5DlJkRi3hBcSjUTVXPJaKcrsJX1LbYiXebu4rmMf0P58p0wpmbmJ/T/dZHdy/0jORHRNvuZkP04="]}]}
         // WebsocketConnection: {"I":"1548328520","E":"There was an error invoking Hub method 'c2.SubscribeToExchangeDeltas'."}
         // better to create SignalR Class to do all of this?
-        let msg = JSON.parse (data);
-        let opIndex = this.safeString (msg, 'I');
+        const msg = JSON.parse (data);
+        const opIndex = this.safeString (msg, 'I');
         if (opIndex !== undefined) {
             // response to a request
-            let result = this.safeValue (msg, 'R');
-            let error = this.safeValue (msg, 'E');
+            const result = this.safeValue (msg, 'R');
+            const error = this.safeValue (msg, 'E');
             if (opIndex !== undefined) {
                 if (opIndex.indexOf ('ob-sub_') === 0) {
-                    let rest = opIndex.replace ('ob-sub_', '');
-                    let parts = rest.split ('_');
-                    let nonce = parts[0];
-                    let id = rest.replace (nonce + '_', '');
+                    const rest = opIndex.replace ('ob-sub_', '');
+                    const parts = rest.split ('_');
+                    const nonce = parts[0];
+                    const id = rest.replace (nonce + '_', '');
                     this.emit (nonce, result, new ExchangeError (error));
                     if (result === true) {
                         this.websocketSendJson ({
@@ -1487,23 +1488,23 @@ module.exports = class bittrex extends Exchange {
                         });
                     }
                 } else if (opIndex.indexOf ('snapshot_') === 0) {
-                    let data = this.inflateRaw (result, 'base64');
-                    let parsedData = JSON.parse (data);
+                    const data = this.inflateRaw (result, 'base64');
+                    const parsedData = JSON.parse (data);
                     this._websocketHandleOrderBookSnapshot (contextId, parsedData);
                 }
             }
         } else {
             // TODO: check sequence number
-            let messages = this.safeValue (msg, 'M');
+            const messages = this.safeValue (msg, 'M');
             if (messages !== undefined) {
                 for (let i = 0; i < messages.length; i++) {
-                    let hub = this.safeString (messages[i], 'H');
-                    let method = this.safeString (messages[i], 'M');
-                    let methodArgs = this.safeValue (messages[i], 'A');
+                    const hub = this.safeString (messages[i], 'H');
+                    const method = this.safeString (messages[i], 'M');
+                    const methodArgs = this.safeValue (messages[i], 'A');
                     if (hub === 'C2') {
                         if (method === 'uE') {
-                            let data = this.inflateRaw (methodArgs[0], 'base64');
-                            let parsedData = JSON.parse (data);
+                            const data = this.inflateRaw (methodArgs[0], 'base64');
+                            const parsedData = JSON.parse (data);
                             this._websocketHandleOrderBookDelta (contextId, parsedData);
                         }
                     }
@@ -1514,14 +1515,14 @@ module.exports = class bittrex extends Exchange {
 
     _websocketParseTrade (trade, symbol) {
         // Websocket trade format different than REST trade format
-        let id = this.safeString (trade, 'FI');
+        const id = this.safeString (trade, 'FI');
         let side = 'sell';
         if (this.safeString (trade, 'OT') === 'BUY') {
             side = 'buy';
         }
-        let price = this.safeFloat (trade, 'R');
-        let amount = this.safeFloat (trade, 'Q');
-        let timestamp = this.safeInteger (trade, 'T');
+        const price = this.safeFloat (trade, 'R');
+        const amount = this.safeFloat (trade, 'Q');
+        const timestamp = this.safeInteger (trade, 'T');
         return {
             'id': id,
             'info': trade,
@@ -1536,13 +1537,13 @@ module.exports = class bittrex extends Exchange {
     }
 
     _websocketHandleOrderBookSnapshot (contextId, data) {
-        let id = this.safeString (data, 'M');
-        let symbol = this.findSymbol (id);
+        const id = this.safeString (data, 'M');
+        const symbol = this.findSymbol (id);
         if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
             return;
         }
-        let ob = this.parseOrderBook (data, undefined, 'Z', 'S', 'R', 'Q');
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const ob = this.parseOrderBook (data, undefined, 'Z', 'S', 'R', 'Q');
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         symbolData['ob'] = ob;
         this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit']));
         this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
@@ -1550,19 +1551,19 @@ module.exports = class bittrex extends Exchange {
 
     _websocketHandleOrderBookDelta (contextId, data) {
         // {"M":"USDT-BTC","N":912014,"Z":[{"TY":0,"R":3504.97634920,"Q":0.26480207},{"TY":1,"R":3504.97634919,"Q":0.0}],"S":[{"TY":0,"R":3579.37236706,"Q":0.21455380},{"TY":1,"R":6429.20850000,"Q":0.0}],"f":[]}
-        let id = this.safeString (data, 'M');
-        let symbol = this.findSymbol (id);
+        const id = this.safeString (data, 'M');
+        const symbol = this.findSymbol (id);
         if (this._contextIsSubscribed (contextId, 'ob', symbol)) {
-            let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+            const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
             if ('ob' in symbolData) {
                 // snapshot previously received, else throw it
-                let bids = this.safeValue (data, 'Z');
-                let asks = this.safeValue (data, 'S');
+                const bids = this.safeValue (data, 'Z');
+                const asks = this.safeValue (data, 'S');
                 if (bids !== undefined) {
                     for (let i = 0; i < bids.length; i++) {
-                        let elemType = this.safeInteger (bids[i], 'TY');
-                        let price = this.safeFloat (bids[i], 'R');
-                        let amount = this.safeFloat (bids[i], 'Q');
+                        const elemType = this.safeInteger (bids[i], 'TY');
+                        const price = this.safeFloat (bids[i], 'R');
+                        const amount = this.safeFloat (bids[i], 'Q');
                         // 0 = ADD, 1 = REMOVE, 2 = UPDATE
                         if (elemType === 1) {
                             this.updateBidAsk ([price, 0], symbolData['ob']['bids'], true);
@@ -1573,9 +1574,9 @@ module.exports = class bittrex extends Exchange {
                 }
                 if (asks !== undefined) {
                     for (let i = 0; i < asks.length; i++) {
-                        let elemType = this.safeInteger (asks[i], 'TY');
-                        let price = this.safeFloat (asks[i], 'R');
-                        let amount = this.safeFloat (asks[i], 'Q');
+                        const elemType = this.safeInteger (asks[i], 'TY');
+                        const price = this.safeFloat (asks[i], 'R');
+                        const amount = this.safeFloat (asks[i], 'Q');
                         // 0 = ADD, 1 = REMOVE, 2 = UPDATE
                         if (elemType === 1) {
                             this.updateBidAsk ([price, 0], symbolData['ob']['asks'], false);
@@ -1589,10 +1590,10 @@ module.exports = class bittrex extends Exchange {
             }
         }
         if (this._contextIsSubscribed (contextId, 'trade', symbol)) {
-            let fills = this.safeValue (data, 'f');
+            const fills = this.safeValue (data, 'f');
             if (fills !== undefined) {
                 for (let i = 0; i < fills.length; i++) {
-                    let trade = this._websocketParseTrade (fills[i], symbol);
+                    const trade = this._websocketParseTrade (fills[i], symbol);
                     this.emit ('trade', symbol, trade);
                 }
             }
@@ -1604,11 +1605,11 @@ module.exports = class bittrex extends Exchange {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         if (event === 'ob') {
-            let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+            const symbolData = this._contextGetSymbolData (contextId, event, symbol);
             symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
             this._contextSetSymbolData (contextId, event, symbol, symbolData);
         }
-        let nonceStr = nonce.toString ();
+        const nonceStr = nonce.toString ();
         if (!this._contextIsSubscribed (contextId, 'ob', symbol) && !this._contextIsSubscribed (contextId, 'trade', symbol)) {
             // send request
             const id = this.marketId (symbol);

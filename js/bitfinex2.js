@@ -694,12 +694,12 @@ module.exports = class bitfinex2 extends bitfinex {
     }
 
     _websocketOnMessage (contextId, data) {
-        let msg = JSON.parse (data);
+        const msg = JSON.parse (data);
         // console.log(msg);
-        let event = this.safeString (msg, 'event');
+        const event = this.safeString (msg, 'event');
         if (typeof event !== 'undefined') {
             if (event === 'subscribed') {
-                let channel = this.safeString (msg, 'channel');
+                const channel = this.safeString (msg, 'channel');
                 if (channel === 'book') {
                     this._websocketHandleSubscription (contextId, 'ob', msg);
                 } else if (channel === 'trades') {
@@ -714,20 +714,20 @@ module.exports = class bitfinex2 extends bitfinex {
             }
         } else {
             // channel data
-            let chanId = msg[0];
-            let data = msg[1];
+            const chanId = msg[0];
+            const data = msg[1];
             if (data === 'hb') {
                 // console.log ('heartbeat');
                 return;
             }
-            let chanKey = '_' + chanId.toString ();
-            let channels = this._contextGet (contextId, 'channels');
+            const chanKey = '_' + chanId.toString ();
+            const channels = this._contextGet (contextId, 'channels');
             if (!(chanKey in channels)) {
                 this.emit ('err', new ExchangeError (this.id + ' msg received from unregistered channels:' + chanId), contextId);
                 return;
             }
-            let symbol = channels[chanKey]['symbol'];
-            let event = channels[chanKey]['event'];
+            const symbol = channels[chanKey]['symbol'];
+            const event = channels[chanKey]['event'];
             if (event === 'ob') {
                 this._websocketHandleOrderBook (contextId, symbol, msg);
             } else if (event === 'trade') {
@@ -737,7 +737,7 @@ module.exports = class bitfinex2 extends bitfinex {
     }
 
     _websocketHandleInfoVersion (contextId, data) {
-        let version = this.safeInteger (data, 'version');
+        const version = this.safeInteger (data, 'version');
         if (typeof version !== 'undefined') {
             this.websocketSendJson ({
                 'event': 'conf',
@@ -748,17 +748,17 @@ module.exports = class bitfinex2 extends bitfinex {
     }
 
     _websocketHandleError (contextId, msg) {
-        let channel = this.safeString (msg, 'channel');
-        let errorMsg = this.safeString (msg, 'msg');
-        let errorCode = this.safeString (msg, 'code');
-        let ex = new ExchangeError (this.id + ' ' + errorCode + ':' + errorMsg);
+        const channel = this.safeString (msg, 'channel');
+        const errorMsg = this.safeString (msg, 'msg');
+        const errorCode = this.safeString (msg, 'code');
+        const ex = new ExchangeError (this.id + ' ' + errorCode + ':' + errorMsg);
         if (channel === 'book') {
-            let id = this.safeString (msg, 'symbol');
-            let symbol = this.findSymbol (id);
+            const id = this.safeString (msg, 'symbol');
+            const symbol = this.findSymbol (id);
             this._websocketProcessPendingNonces (contextId, 'sub-nonces', 'ob', symbol, false, ex);
         } else if (channel === 'trades') {
-            let id = this.safeString (msg, 'symbol');
-            let symbol = this.findSymbol (id);
+            const id = this.safeString (msg, 'symbol');
+            const symbol = this.findSymbol (id);
             this._websocketProcessPendingNonces (contextId, 'sub-nonces', 'trade', symbol, false, ex);
         }
         this.emit ('err', ex, contextId);
@@ -786,16 +786,16 @@ module.exports = class bitfinex2 extends bitfinex {
     }
 
     _websocketHandleOrderBook (contextId, symbol, msg) {
-        let data = msg[1];
-        let firstElement = data[0];
+        const data = msg[1];
+        const firstElement = data[0];
         let timestamp = undefined;
         let dt = undefined;
-        let length = msg.length;
+        const length = msg.length;
         if (length > 2) {
             timestamp = msg[2];
             dt = this.iso8601 (timestamp);
         }
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (Array.isArray (firstElement)) {
             // snapshot
             symbolData['ob'] = {
@@ -806,9 +806,9 @@ module.exports = class bitfinex2 extends bitfinex {
                 'nonce': undefined,
             };
             for (let i = 0; i < data.length; i++) {
-                let record = data[i];
-                let price = record[0];
-                let c = record[1];
+                const record = data[i];
+                const price = record[0];
+                const c = record[1];
                 let amount = record[2];
                 let side = undefined;
                 let isBid = undefined;
@@ -830,8 +830,8 @@ module.exports = class bitfinex2 extends bitfinex {
             }
         } else {
             // update
-            let price = data[0];
-            let c = data[1];
+            const price = data[0];
+            const c = data[1];
             let amount = data[2];
             let side = undefined;
             let isBid = undefined;
@@ -858,12 +858,12 @@ module.exports = class bitfinex2 extends bitfinex {
     }
 
     _websocketProcessPendingNonces (contextId, nonceKey, event, symbol, success, ex) {
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (nonceKey in symbolData) {
-            let nonces = symbolData[nonceKey];
+            const nonces = symbolData[nonceKey];
             const keys = Object.keys (nonces);
             for (let i = 0; i < keys.length; i++) {
-                let nonce = keys[i];
+                const nonce = keys[i];
                 this._cancelTimeout (nonces[nonce]);
                 this.emit (nonce, success, ex);
             }
@@ -873,10 +873,10 @@ module.exports = class bitfinex2 extends bitfinex {
     }
 
     _websocketHandleSubscription (contextId, event, msg) {
-        let id = this.safeString (msg, 'symbol');
-        let symbol = this.findSymbol (id);
-        let channel = this.safeInteger (msg, 'chanId');
-        let chanKey = '_' + channel.toString ();
+        const id = this.safeString (msg, 'symbol');
+        const symbol = this.findSymbol (id);
+        const channel = this.safeInteger (msg, 'chanId');
+        const chanKey = '_' + channel.toString ();
         let channels = this._contextGet (contextId, 'channels');
         if (typeof channels === 'undefined') {
             channels = {};
@@ -887,7 +887,7 @@ module.exports = class bitfinex2 extends bitfinex {
             'event': event,
         };
         this._contextSet (contextId, 'channels', channels);
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         symbolData['channelId'] = channel;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         if (event === 'ob') {
@@ -898,17 +898,17 @@ module.exports = class bitfinex2 extends bitfinex {
     }
 
     _websocketHandleUnsubscription (contextId, msg) {
-        let status = this.safeString (msg, 'status');
+        const status = this.safeString (msg, 'status');
         if (status === 'OK') {
-            let chanId = this.safeInteger (msg, 'chanId');
-            let chanKey = '_' + chanId.toString ();
-            let channels = this._contextGet (contextId, 'channels');
+            const chanId = this.safeInteger (msg, 'chanId');
+            const chanKey = '_' + chanId.toString ();
+            const channels = this._contextGet (contextId, 'channels');
             if (!(chanKey in channels)) {
                 this.emit ('err', new ExchangeError (this.id + ' msg received from unregistered channels:' + chanId), contextId);
                 return;
             }
-            let symbol = channels[chanKey]['symbol'];
-            let event = channels[chanKey]['event'];
+            const symbol = channels[chanKey]['symbol'];
+            const event = channels[chanKey]['event'];
             // remove channel ids ?
             this.omit (channels, chanKey);
             this._contextSet (contextId, 'channels', channels);
@@ -921,13 +921,13 @@ module.exports = class bitfinex2 extends bitfinex {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         // save nonce for subscription response
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (!('sub-nonces' in symbolData)) {
             symbolData['sub-nonces'] = {};
         }
         symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
         symbolData['sub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         // send request
@@ -954,25 +954,25 @@ module.exports = class bitfinex2 extends bitfinex {
         if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
-        let payload = {
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const payload = {
             'event': 'unsubscribe',
             'chanId': symbolData['channelId'],
         };
         if (!('unsub-nonces' in symbolData)) {
             symbolData['unsub-nonces'] = {};
         }
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
         symbolData['unsub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         this.websocketSendJson (payload);
     }
 
     _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (key in symbolData) {
-            let nonces = symbolData[key];
+            const nonces = symbolData[key];
             if (timerNonce in nonces) {
                 this.omit (symbolData[key], timerNonce);
                 this._contextSetSymbolData (contextId, event, symbol, symbolData);
@@ -981,7 +981,7 @@ module.exports = class bitfinex2 extends bitfinex {
     }
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
             return this._cloneOrderBook (data['ob'], limit);
         }

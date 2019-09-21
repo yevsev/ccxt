@@ -665,15 +665,15 @@ module.exports = class zb extends Exchange {
     }
 
     endsWith (s1, s2) {
-        let index = s1.indexOf (s2);
-        let strLen = s1.length - 0; // a transpiler workaround
+        const index = s1.indexOf (s2);
+        const strLen = s1.length - 0; // a transpiler workaround
         return (index === (strLen - s2.length));
     }
 
     _websocketOnMessage (contextId, data) {
-        let msg = JSON.parse (data);
-        let success = this.safeValue (msg, 'success', true);
-        let channel = this.safeString (msg, 'channel');
+        const msg = JSON.parse (data);
+        const success = this.safeValue (msg, 'success', true);
+        const channel = this.safeString (msg, 'channel');
         let pairId = undefined;
         let channelType = undefined;
         if (this.endsWith (channel, '_depth')) {
@@ -683,7 +683,7 @@ module.exports = class zb extends Exchange {
             // could not determine channel
             return;
         }
-        let pairIdList = this._contextGet (contextId, 'pairids');
+        const pairIdList = this._contextGet (contextId, 'pairids');
         if (typeof pairIdList === 'undefined') {
             this.emit ('err', new ExchangeError (this.id + ' internal error: unitialized pairids dict in context '));
             return;
@@ -692,14 +692,14 @@ module.exports = class zb extends Exchange {
             this.emit ('err', new ExchangeError (this.id + ' error receiving unexpected market id ' + pairId));
             return;
         }
-        let id = pairIdList[pairId];
-        let symbol = this.findSymbol (id);
+        const id = pairIdList[pairId];
+        const symbol = this.findSymbol (id);
         if (!success) {
-            let code = this.safeString (msg, 'code', '0');
-            let errMsg = this.safeString (msg, 'message', 'unknown error');
+            const code = this.safeString (msg, 'code', '0');
+            const errMsg = this.safeString (msg, 'message', 'unknown error');
             // error?
             if (channelType === 'ob') {
-                let ex = new ExchangeError (this.id + ' subscribing error (code: ' + code + ' error: ' + errMsg + ')');
+                const ex = new ExchangeError (this.id + ' subscribing error (code: ' + code + ' error: ' + errMsg + ')');
                 this._websocketEmitObSubscription (contextId, symbol, false, ex);
             }
             return;
@@ -711,12 +711,12 @@ module.exports = class zb extends Exchange {
     }
 
     _websocketEmitObSubscription (contextId, symbol, success, exception) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if ('sub-nonces' in data) {
-            let nonces = data['sub-nonces'];
+            const nonces = data['sub-nonces'];
             const keys = Object.keys (nonces);
             for (let i = 0; i < keys.length; i++) {
-                let nonce = keys[i];
+                const nonce = keys[i];
                 this._cancelTimeout (nonces[nonce]);
                 this.emit (nonce, success, exception);
             }
@@ -726,8 +726,8 @@ module.exports = class zb extends Exchange {
     }
 
     _websocketHandleOb (contextId, msg, symbol) {
-        let ob = this.parseOrderBook (msg);
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const ob = this.parseOrderBook (msg);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         data['ob'] = ob;
         this._contextSetSymbolData (contextId, 'ob', symbol, data);
         this.emit ('ob', symbol, this._cloneOrderBook (ob, data['limit']));
@@ -737,9 +737,9 @@ module.exports = class zb extends Exchange {
         if (event !== 'ob') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let id = this.market_id (symbol);
-        let pairId = id.replace ('_', '');
-        let payload = {
+        const id = this.market_id (symbol);
+        const pairId = id.replace ('_', '');
+        const payload = {
             'event': 'addChannel',
             'channel': pairId + '_depth',
         };
@@ -749,12 +749,12 @@ module.exports = class zb extends Exchange {
         }
         pairIdList[pairId] = id;
         this._contextSet (contextId, 'pairids', pairIdList);
-        let data = this._contextGetSymbolData (contextId, event, symbol);
+        const data = this._contextGetSymbolData (contextId, event, symbol);
         if (!('sub-nonces' in data)) {
             data['sub-nonces'] = {};
         }
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonces']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonces']);
         data['sub-nonces'][nonceStr] = handle;
         data['limit'] = this.safeValue (params, 'limit');
         this._contextSetSymbolData (contextId, event, symbol, data);
@@ -766,9 +766,9 @@ module.exports = class zb extends Exchange {
     }
 
     _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
-        let data = this._contextGetSymbolData (contextId, event, symbol);
+        const data = this._contextGetSymbolData (contextId, event, symbol);
         if (key in data) {
-            let nonces = data[key];
+            const nonces = data[key];
             if (timerNonce in nonces) {
                 this.omit (data[key], timerNonce);
                 this._contextSetSymbolData (contextId, event, symbol);
@@ -777,7 +777,7 @@ module.exports = class zb extends Exchange {
     }
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
             return this._cloneOrderBook (data['ob'], limit);
         }

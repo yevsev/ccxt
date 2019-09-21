@@ -1250,7 +1250,7 @@ class bitmex (Exchange):
             self._websocket_handle_error(contextId, msg)
 
     def _websocket_on_pong(self, contextId, sequence):
-        print("PONG " + sequence)
+        print('PONG ' + sequence)
         sequenceStr = '_' + str(sequence)
         pongTimers = self._contextGet(contextId, 'pongtimers')
         if sequenceStr in pongTimers:
@@ -1262,12 +1262,12 @@ class bitmex (Exchange):
 
     def _websocket_timeout_send_ping(self, contextId):
         lastSeq = self._contextGet(contextId, 'pingseq')
-        if (lastSeq is None){
+        if lastSeq is None:
             lastSeq = 1
         else:
             lastSeq = lastSeq + 1
         sequenceStr = '_' + str(lastSeq)
-        print("PING " + lastSeq)
+        print('PING ' + lastSeq)
         self._contextSet(contextId, 'pingseq', lastSeq)
         self.websocketSendPing(lastSeq)
         pongTimers = self._contextGet(contextId, 'pongtimers')
@@ -1278,7 +1278,7 @@ class bitmex (Exchange):
         self._contextSet(contextId, 'pongtimers', pongTimers)
 
     def _websocket_timeout_pong(self, contextId, sequence):
-        self.emit('err', ExchangeError(self.id + ' no pong received for '+ sequence))
+        self.emit('err', ExchangeError(self.id + ' no pong received for ' + sequence))
 
     def _websocket_handle_error(self, contextId, msg):
         status = self.safe_integer(msg, 'status')

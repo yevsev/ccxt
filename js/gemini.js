@@ -721,9 +721,9 @@ module.exports = class gemini extends Exchange {
     }
 
     _websocketParseTrade (trade, symbol, encapsulating_msg) {
-        let timestamp = encapsulating_msg['timestampms'];
-        let price = this.safeFloat (trade, 'price');
-        let amount = this.safeFloat (trade, 'amount');
+        const timestamp = encapsulating_msg['timestampms'];
+        const price = this.safeFloat (trade, 'price');
+        const amount = this.safeFloat (trade, 'amount');
         return {
             'id': trade['tid'].toString (),
             'info': trade,
@@ -739,15 +739,15 @@ module.exports = class gemini extends Exchange {
     }
 
     _websocketHandleTrade (encapsulating_msg, event, symbol) {
-        let trade = this._websocketParseTrade (event, symbol, encapsulating_msg);
+        const trade = this._websocketParseTrade (event, symbol, encapsulating_msg);
         this.emit ('trade', symbol, trade);
     }
 
     _websocketOnMessage (contextId, data) {
-        let msg = JSON.parse (data);
+        const msg = JSON.parse (data);
         // console.log(msg);
         let lastSeqId = this._contextGet (contextId, 'sequence_id');
-        let seqId = this.safeInteger (msg, 'socket_sequence');
+        const seqId = this.safeInteger (msg, 'socket_sequence');
         if (typeof lastSeqId !== 'undefined') {
             lastSeqId = lastSeqId + 1;
             if (lastSeqId !== seqId) {
@@ -756,22 +756,22 @@ module.exports = class gemini extends Exchange {
             }
         }
         this._contextSet (contextId, 'sequence_id', seqId);
-        let symbol = this._contextGet (contextId, 'symbol');
-        let msgType = msg['type'];
+        const symbol = this._contextGet (contextId, 'symbol');
+        const msgType = msg['type'];
         if (msgType === 'heartbeat') {
             return;
         }
         if (msgType === 'update') {
-            let events = this.safeValue (msg, 'events', []);
+            const events = this.safeValue (msg, 'events', []);
             let symbolData = undefined;
             let obEventActive = false;
-            let subscribedEvents = this._contextGetEvents (contextId);
+            const subscribedEvents = this._contextGetEvents (contextId);
             if ('ob' in subscribedEvents) {
                 symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
                 obEventActive = true;
-                let eventsLength = events.length;
+                const eventsLength = events.length;
                 if (eventsLength > 0) {
-                    let event = events[0];
+                    const event = events[0];
                     if ((event['type'] === 'change') && (this.safeString (event, 'reason') === 'initial')) {
                         symbolData['ob'] = {
                             'bids': [],
@@ -789,13 +789,13 @@ module.exports = class gemini extends Exchange {
                 }
             }
             for (let i = 0; i < events.length; i++) {
-                let event = events[i];
-                let eventType = event['type'];
+                const event = events[i];
+                const eventType = event['type'];
                 if ((eventType === 'change') && obEventActive) {
-                    let side = this.safeString (event, 'side');
-                    let price = this.safeFloat (event, 'price');
-                    let size = this.safeFloat (event, 'remaining');
-                    let keySide = (side === 'bid') ? 'bids' : 'asks';
+                    const side = this.safeString (event, 'side');
+                    const price = this.safeFloat (event, 'price');
+                    const size = this.safeFloat (event, 'remaining');
+                    const keySide = (side === 'bid') ? 'bids' : 'asks';
                     this.updateBidAsk ([price, size], symbolData['ob'][keySide], side === 'bid');
                 } else if (eventType === 'trade' && ('trade' in subscribedEvents)) {
                     this._websocketHandleTrade (msg, event, symbol);
@@ -813,11 +813,11 @@ module.exports = class gemini extends Exchange {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         if (event === 'ob') {
-            let data = this._contextGetSymbolData (contextId, event, symbol);
+            const data = this._contextGetSymbolData (contextId, event, symbol);
             data['limit'] = this.safeInteger (params, 'limit', undefined);
             this._contextSetSymbolData (contextId, event, symbol, data);
         }
-        let nonceStr = nonce.toString ();
+        const nonceStr = nonce.toString ();
         this.emit (nonceStr, true);
     }
 
@@ -825,14 +825,14 @@ module.exports = class gemini extends Exchange {
         if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let nonceStr = nonce.toString ();
+        const nonceStr = nonce.toString ();
         this.emit (nonceStr, true);
     }
 
     _websocketOnOpen (contextId, websocketConexConfig) {
-        let undef = undefined;
+        const undef = undefined;
         this._contextSet (contextId, 'sequence_id', undef);
-        let url = websocketConexConfig['url'];
+        const url = websocketConexConfig['url'];
         let parts = url.split ('?');
         let partsLen = parts.length;
         if (partsLen > 1) {
@@ -844,7 +844,7 @@ module.exports = class gemini extends Exchange {
             this._contextSet (contextId, 'symbol', symbol);
             params = params.split ('&');
             for (let i = 0; i < params.length; i++) {
-                let param = params[i];
+                const param = params[i];
                 parts = param.split ('=');
                 partsLen = parts.length;
                 // if (partsLen > 1) {
@@ -864,14 +864,14 @@ module.exports = class gemini extends Exchange {
     _websocketGenerateUrlStream (events, options, params = {}) {
         // check all events has the same symbol and build parameter list
         let symbol = undefined;
-        let urlParams = {
+        const urlParams = {
             'heartbeat': 'true',
             'bids': 'true',
             'offers': 'true',
             'trades': 'true',
         };
         for (let i = 0; i < events.length; i++) {
-            let event = events[i];
+            const event = events[i];
             if (!symbol) {
                 symbol = event['symbol'];
             } else if (symbol !== event['symbol']) {
@@ -885,7 +885,7 @@ module.exports = class gemini extends Exchange {
     }
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
             return this._cloneOrderBook (data['ob'], limit);
         }

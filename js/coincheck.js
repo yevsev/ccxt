@@ -446,8 +446,8 @@ module.exports = class coincheck extends Exchange {
     }
 
     _websocketOnMessage (contextId, data) {
-        let msg = JSON.parse (data);
-        let id = this.safeInteger ({
+        const msg = JSON.parse (data);
+        const id = this.safeInteger ({
             'a': msg[0],
         }, 'a');
         if (typeof id === 'undefined') {
@@ -457,10 +457,10 @@ module.exports = class coincheck extends Exchange {
     }
 
     _websocketHandleOb (contextId, msg) {
-        let symbol = this.findSymbol (msg[0]);
+        const symbol = this.findSymbol (msg[0]);
         let ob = msg[1];
         // just testing
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (!('ob' in data)) {
             ob = this.parseOrderBook (ob, undefined);
             data['ob'] = ob;
@@ -476,15 +476,15 @@ module.exports = class coincheck extends Exchange {
         if (event !== 'ob') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let payload = {
+        const payload = {
             'type': 'subscribe',
             'channel': this.marketId (symbol) + '-orderbook',
         };
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         data['limit'] = this.safeInteger (params, 'limit', undefined);
         this._contextSetSymbolData (contextId, 'ob', symbol, data);
         this.websocketSendJson (payload);
-        let nonceStr = nonce.toString ();
+        const nonceStr = nonce.toString ();
         this.emit (nonceStr, true);
     }
 
@@ -493,7 +493,7 @@ module.exports = class coincheck extends Exchange {
     }
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
             return this._cloneOrderBook (data['ob'], limit);
         }

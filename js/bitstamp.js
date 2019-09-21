@@ -1173,13 +1173,13 @@ module.exports = class bitstamp extends Exchange {
     }
 
     _websocketOnMessage (contextId, data) {
-        let msg = JSON.parse (data);
+        const msg = JSON.parse (data);
         // console.log(data);
-        let evt = this.safeString (msg, 'event');
+        const evt = this.safeString (msg, 'event');
         if (evt === 'subscription_succeeded') {
             this._websocketHandleSubscription (contextId, msg);
         } else if (evt === 'data') {
-            let chan = this.safeString (msg, 'channel');
+            const chan = this.safeString (msg, 'channel');
             if (chan.indexOf ('order_book') >= 0) {
                 this._websocketHandleOrderbook (contextId, msg);
             }
@@ -1189,24 +1189,24 @@ module.exports = class bitstamp extends Exchange {
     }
 
     _websocketHandleOrderbook (contextId, msg) {
-        let chan = this.safeString (msg, 'channel');
-        let parts = chan.split ('_');
+        const chan = this.safeString (msg, 'channel');
+        const parts = chan.split ('_');
         let id = 'btcusd';
         if (parts.length > 2) {
             id = parts[2];
         }
-        let symbol = this.findSymbol (id);
-        let data = this.safeValue (msg, 'data');
-        let timestamp = this.safeInteger (data, 'timestamp');
-        let ob = this.parseOrderBook (data, timestamp * 1000);
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const symbol = this.findSymbol (id);
+        const data = this.safeValue (msg, 'data');
+        const timestamp = this.safeInteger (data, 'timestamp');
+        const ob = this.parseOrderBook (data, timestamp * 1000);
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         symbolData['ob'] = ob;
         this.emit ('ob', symbol, this._cloneOrderBook (ob, symbolData['limit']));
         this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
     }
 
     _websocketParseTrade (data, symbol) {
-        let timestamp_ms = parseInt (this.safeInteger (data, 'microtimestamp') / 1000);
+        const timestamp_ms = parseInt (this.safeInteger (data, 'microtimestamp') / 1000);
         let side = this.safeString (data, 'type');
         if (side !== undefined) {
             side = (side === '1') ? 'sell' : 'buy';
@@ -1226,20 +1226,20 @@ module.exports = class bitstamp extends Exchange {
 
     _websocketHandleTrade (contextId, msg) {
         // msg example: {'event': 'trade', 'channel': 'live_trades_btceur', 'data': {'microtimestamp': '1551914592860723', 'amount': 0.06388482, 'buy_order_id': 2967695978, 'sell_order_id': 2967695603, 'amount_str': '0.06388482', 'price_str': '3407.43', 'timestamp': '1551914592', 'price': 3407.43, 'type': 0, 'id': 83631877}}
-        let chan = this.safeString (msg, 'channel');
-        let parts = chan.split ('_');
+        const chan = this.safeString (msg, 'channel');
+        const parts = chan.split ('_');
         let id = 'btcusd';
         if (parts.length > 2) {
             id = parts[2];
         }
-        let symbol = this.findSymbol (id);
-        let data = this.safeValue (msg, 'data');
-        let trade = this._websocketParseTrade (data, symbol);
+        const symbol = this.findSymbol (id);
+        const data = this.safeValue (msg, 'data');
+        const trade = this._websocketParseTrade (data, symbol);
         this.emit ('trade', symbol, trade);
     }
 
     _websocketHandleSubscription (contextId, msg) {
-        let chan = this.safeString (msg, 'channel');
+        const chan = this.safeString (msg, 'channel');
         let event = undefined;
         if (chan.indexOf ('order_book') >= 0) {
             event = 'ob';
@@ -1249,18 +1249,18 @@ module.exports = class bitstamp extends Exchange {
             event = undefined;
         }
         if (typeof event !== 'undefined') {
-            let parts = chan.split ('_');
+            const parts = chan.split ('_');
             let id = 'btcusd';
             if (parts.length > 2) {
                 id = parts[2];
             }
-            let symbol = this.findSymbol (id);
-            let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+            const symbol = this.findSymbol (id);
+            const symbolData = this._contextGetSymbolData (contextId, event, symbol);
             if ('sub-nonces' in symbolData) {
-                let nonces = symbolData['sub-nonces'];
+                const nonces = symbolData['sub-nonces'];
                 const keys = Object.keys (nonces);
                 for (let i = 0; i < keys.length; i++) {
-                    let nonce = keys[i];
+                    const nonce = keys[i];
                     this._cancelTimeout (nonces[nonce]);
                     this.emit (nonce, true);
                 }
@@ -1275,13 +1275,13 @@ module.exports = class bitstamp extends Exchange {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         // save nonce for subscription response
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (!('sub-nonces' in symbolData)) {
             symbolData['sub-nonces'] = {};
         }
         symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
         let channel = undefined;
         symbolData['sub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
@@ -1319,14 +1319,14 @@ module.exports = class bitstamp extends Exchange {
             'event': 'unsubscribe',
             'channel': channel,
         });
-        let nonceStr = nonce.toString ();
+        const nonceStr = nonce.toString ();
         this.emit (nonceStr, true);
     }
 
     _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (key in symbolData) {
-            let nonces = symbolData[key];
+            const nonces = symbolData[key];
             if (timerNonce in nonces) {
                 this.omit (symbolData[key], timerNonce);
                 this._contextSetSymbolData (contextId, event, symbol, symbolData);
@@ -1335,7 +1335,7 @@ module.exports = class bitstamp extends Exchange {
     }
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
             return this._cloneOrderBook (data['ob'], limit);
         }

@@ -1457,36 +1457,36 @@ module.exports = class kraken extends Exchange {
     }
 
     _websocketOnMessage (contextId, data) {
-        let msg = JSON.parse (data);
-        let event = this.safeString (msg, 'event');
-        let status = this.safeString (msg, 'status');
+        const msg = JSON.parse (data);
+        const event = this.safeString (msg, 'event');
+        const status = this.safeString (msg, 'status');
         if (event === undefined) {
             // channel data
-            let chanId = msg[0];
-            let data = msg[1];
+            const chanId = msg[0];
+            const data = msg[1];
             if (data === 'hb') {
                 // console.log ('heartbeat');
                 return;
             }
-            let chanKey = '_' + chanId.toString ();
-            let channels = this._contextGet (contextId, 'channels');
+            const chanKey = '_' + chanId.toString ();
+            const channels = this._contextGet (contextId, 'channels');
             if (!(chanKey in channels)) {
                 this.emit ('err', new ExchangeError (this.id + ' msg received from unregistered channels:' + chanId), contextId);
                 return;
             }
-            let symbol = channels[chanKey]['symbol'];
-            let event = channels[chanKey]['event'];
+            const symbol = channels[chanKey]['symbol'];
+            const event = channels[chanKey]['event'];
             if (event === 'ob') {
                 this._websocketHandleOrderBook (contextId, symbol, data);
             }
         } else if (event === 'subscriptionStatus') {
             // event
-            let id = this.safeString (msg, 'pair');
+            const id = this.safeString (msg, 'pair');
             let symbol = this.findSymbol (id);
             if (symbol === undefined) {
                 symbol = id;
             }
-            let subscriptionInfo = this.safeValue (msg, 'subscription');
+            const subscriptionInfo = this.safeValue (msg, 'subscription');
             let event = this.safeString (subscriptionInfo, 'name');
             event = this._websocketTranslateEvent (event);
             if (status === 'subscribed') {
@@ -1494,8 +1494,8 @@ module.exports = class kraken extends Exchange {
             } else if (status === 'unsubscribed') {
                 this._websocketHandleUnsubscription (contextId, msg);
             } else if (status === 'error') {
-                let errorMsg = this.safeString (msg, 'errorMessage');
-                let ex = new ExchangeError (this.id + ' ' + errorMsg);
+                const errorMsg = this.safeString (msg, 'errorMessage');
+                const ex = new ExchangeError (this.id + ' ' + errorMsg);
                 if (symbol !== undefined) {
                     this._websocketProcessPendingNonces (contextId, 'sub-nonces', 'ob', symbol, false, ex);
                 }
@@ -1503,15 +1503,15 @@ module.exports = class kraken extends Exchange {
                 this.emit ('err', new ExchangeError (this.id + ' not valid status received ' + status), contextId);
             }
         } else if (status === 'error') {
-            let errorMsg = this.safeString (msg, 'errorMessage');
-            let ex = new ExchangeError (this.id + ' ' + errorMsg);
+            const errorMsg = this.safeString (msg, 'errorMessage');
+            const ex = new ExchangeError (this.id + ' ' + errorMsg);
             this.emit ('err', ex, contextId);
         }
     }
 
     _websocketHandleSubscription (contextId, event, symbol, msg) {
-        let channel = this.safeInteger (msg, 'channelID');
-        let chanKey = '_' + channel.toString ();
+        const channel = this.safeInteger (msg, 'channelID');
+        const chanKey = '_' + channel.toString ();
         let channels = this._contextGet (contextId, 'channels');
         if (typeof channels === 'undefined') {
             channels = {};
@@ -1522,7 +1522,7 @@ module.exports = class kraken extends Exchange {
             'event': event,
         };
         this._contextSet (contextId, 'channels', channels);
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         symbolData['channelId'] = channel;
         symbolData['ob'] = {
             'bids': [],
@@ -1536,15 +1536,15 @@ module.exports = class kraken extends Exchange {
     }
 
     _websocketHandleUnsubscription (contextId, msg) {
-        let chanId = this.safeInteger (msg, 'channelID');
-        let chanKey = '_' + chanId.toString ();
-        let channels = this._contextGet (contextId, 'channels');
+        const chanId = this.safeInteger (msg, 'channelID');
+        const chanKey = '_' + chanId.toString ();
+        const channels = this._contextGet (contextId, 'channels');
         if (!(chanKey in channels)) {
             this.emit ('err', new ExchangeError (this.id + ' msg received from unregistered channels:' + chanId), contextId);
             return;
         }
-        let symbol = channels[chanKey]['symbol'];
-        let event = channels[chanKey]['event'];
+        const symbol = channels[chanKey]['symbol'];
+        const event = channels[chanKey]['event'];
         // remove channel ids ?
         this.omit (channels, chanKey);
         this._contextSet (contextId, 'channels', channels);
@@ -1552,12 +1552,12 @@ module.exports = class kraken extends Exchange {
     }
 
     _websocketHandleOrderBook (contextId, symbol, data) {
-        let bids = this.safeValue (data, 'bs');
-        let asks = this.safeValue (data, 'as');
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const bids = this.safeValue (data, 'bs');
+        const asks = this.safeValue (data, 'as');
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         if ((bids !== undefined) && (asks !== undefined)) {
             // snapshot
-            let ob = this.parseOrderBook (data, undefined, 'bs', 'as');
+            const ob = this.parseOrderBook (data, undefined, 'bs', 'as');
             symbolData['ob'] = ob;
         } else {
             symbolData['ob'] = this.mergeOrderBookDelta (symbolData['ob'], data, undefined, 'b', 'a');
@@ -1567,12 +1567,12 @@ module.exports = class kraken extends Exchange {
     }
 
     _websocketProcessPendingNonces (contextId, nonceKey, event, symbol, success, ex) {
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (nonceKey in symbolData) {
-            let nonces = symbolData[nonceKey];
+            const nonces = symbolData[nonceKey];
             const keys = Object.keys (nonces);
             for (let i = 0; i < keys.length; i++) {
-                let nonce = keys[i];
+                const nonce = keys[i];
                 this._cancelTimeout (nonces[nonce]);
                 this.emit (nonce, success, ex);
             }
@@ -1586,19 +1586,19 @@ module.exports = class kraken extends Exchange {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         // save nonce for subscription response
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (!('sub-nonces' in symbolData)) {
             symbolData['sub-nonces'] = {};
         }
-        let depthValidValues = [10, 25, 100, 500, 1000];
-        let depth = this.safeInteger (params, 'depth', 1000);
+        const depthValidValues = [10, 25, 100, 500, 1000];
+        const depth = this.safeInteger (params, 'depth', 1000);
         if (!this.inArray (depth, depthValidValues)) {
             throw new ExchangeError (this.id + 'Not valid "depth" value (' + depthValidValues.toString () + ')');
         }
         symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
         symbolData['depth'] = depth;
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
         symbolData['sub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         // send request
@@ -1616,25 +1616,25 @@ module.exports = class kraken extends Exchange {
         if (event !== 'ob') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
-        let payload = {
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const payload = {
             'event': 'unsubscribe',
             'channelID': symbolData['channelId'],
         };
         if (!('unsub-nonces' in symbolData)) {
             symbolData['unsub-nonces'] = {};
         }
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
         symbolData['unsub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         this.websocketSendJson (payload);
     }
 
     _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (key in symbolData) {
-            let nonces = symbolData[key];
+            const nonces = symbolData[key];
             if (timerNonce in nonces) {
                 this.omit (symbolData[key], timerNonce);
                 this._contextSetSymbolData (contextId, event, symbol, symbolData);
@@ -1643,7 +1643,7 @@ module.exports = class kraken extends Exchange {
     }
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
             return this._cloneOrderBook (data['ob'], limit);
         }

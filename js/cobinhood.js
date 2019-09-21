@@ -906,23 +906,23 @@ module.exports = class cobinhood extends Exchange {
     }
 
     _websocketOnMessage (contextId, data) {
-        let msg = JSON.parse (data);
+        const msg = JSON.parse (data);
         // console.log(msg);
-        let h = this.safeValue (msg, 'h', ['', '', '']);
-        let channel = h[0];
-        let version = h[1];
-        let type = h[2];
+        const h = this.safeValue (msg, 'h', ['', '', '']);
+        const channel = h[0];
+        const version = h[1];
+        const type = h[2];
         if (version !== '2') {
             this.emit ('err', new ExchangeError (this.id + ' version response :' + version + ' != 2'), contextId);
             return;
         }
-        let parts = channel.split ('.');
-        let id = parts[1];
-        let symbol = this.findSymbol (id);
+        const parts = channel.split ('.');
+        const id = parts[1];
+        const symbol = this.findSymbol (id);
         if (type === 'error') {
             this.emit ('err', new ExchangeError (this.id + ' error ' + h[3] + ':' + h[4]));
         } else if (type === 'pong') {
-            let pongTimeout = this._contextGet (contextId, 'pongtimeout');
+            const pongTimeout = this._contextGet (contextId, 'pongtimeout');
             this._cancelTimeout (pongTimeout);
             this.emit ('pong');
         } else if (channel.indexOf ('order-book.') >= 0) {
@@ -989,19 +989,19 @@ module.exports = class cobinhood extends Exchange {
     }
 
     _websocketOnClose (contextId) {
-        let heartbeatTimer = this._contextGet (contextId, 'heartbeattimer');
+        const heartbeatTimer = this._contextGet (contextId, 'heartbeattimer');
         if (typeof heartbeatTimer !== 'undefined') {
             this._cancelTimer (heartbeatTimer);
         }
     }
 
     _websocketPongTimeout (contextId) {
-        let ex = new RequestTimeout (this.id + ' does not received pong message after 30 seconds');
+        const ex = new RequestTimeout (this.id + ' does not received pong message after 30 seconds');
         this.emit ('err', ex, contextId);
     }
 
     _websocketSendHeartbeat (contextId) {
-        let pongTimeout = this._setTimeout (contextId, 30000, this._websocketMethodMap ('_websocketPongTimeout'), [contextId]);
+        const pongTimeout = this._setTimeout (contextId, 30000, this._websocketMethodMap ('_websocketPongTimeout'), [contextId]);
         this._contextSet (contextId, 'pongtimeout', pongTimeout);
         this.websocketSendJson ({
             'action': 'ping',
@@ -1009,40 +1009,40 @@ module.exports = class cobinhood extends Exchange {
     }
 
     _websocketHandleOrderBookSnapshot (contextId, symbol, msg) {
-        let d = this.safeValue (msg, 'd', {
+        const d = this.safeValue (msg, 'd', {
             'bids': [],
             'asks': [],
         });
-        let ob = this.parseOrderBook (d, undefined, 'bids', 'asks', 0, 2);
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const ob = this.parseOrderBook (d, undefined, 'bids', 'asks', 0, 2);
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         symbolData['ob'] = ob;
         this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
         this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit']));
     }
 
     _websocketHandleOrderBookUpdate (contextId, symbol, msg) {
-        let d = this.safeValue (msg, 'd', {
+        const d = this.safeValue (msg, 'd', {
             'bids': [],
             'asks': [],
         });
-        let delta = this.parseOrderBook (d, undefined, 'bids', 'asks', 0, 2);
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const delta = this.parseOrderBook (d, undefined, 'bids', 'asks', 0, 2);
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         symbolData['ob'] = this.mergeOrderBookDeltaDiff (symbolData['ob'], delta);
         this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
         this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit']));
     }
 
     _websocketHandleTicker (contextId, symbol, msg) {
-        let d = this.safeValue (msg, 'd');
-        let timestamp = parseInt (d[0]);
-        let highestBid = parseFloat (d[1]);
-        let lowestAsk = parseFloat (d[2]);
-        let _24hVolume = parseFloat (d[3]);
-        let _24hLow = parseFloat (d[4]);
-        let _24High = parseFloat (d[5]);
-        let _24hOpen = parseFloat (d[6]);
-        let lastTradePrice = parseFloat (d[7]);
-        let t = {
+        const d = this.safeValue (msg, 'd');
+        const timestamp = parseInt (d[0]);
+        const highestBid = parseFloat (d[1]);
+        const lowestAsk = parseFloat (d[2]);
+        const _24hVolume = parseFloat (d[3]);
+        const _24hLow = parseFloat (d[4]);
+        const _24High = parseFloat (d[5]);
+        const _24hOpen = parseFloat (d[6]);
+        const lastTradePrice = parseFloat (d[7]);
+        const t = {
             'symbol': symbol,
             'timestamp': timestamp,
             'datetime': this.iso8601 (timestamp),
@@ -1072,17 +1072,17 @@ module.exports = class cobinhood extends Exchange {
         if (!Array.isArray (data)) {
             data = [data];
         }
-        let trades = [];
+        const trades = [];
         for (let i = 0; i < data.length; i++) {
-            let d = data[i];
-            let tradeId = d[0];
-            let timestamp = parseInt (d[1]);
-            let makerSide = d[2];
-            let price = parseFloat (d[3]);
-            let amount = parseFloat (d[4]);
-            let cost = price * amount;
-            let side = (makerSide === 'bid') ? 'sell' : 'buy';
-            let t = {
+            const d = data[i];
+            const tradeId = d[0];
+            const timestamp = parseInt (d[1]);
+            const makerSide = d[2];
+            const price = parseFloat (d[3]);
+            const amount = parseFloat (d[4]);
+            const cost = price * amount;
+            const side = (makerSide === 'bid') ? 'sell' : 'buy';
+            const t = {
                 'info': d,
                 'timestamp': timestamp,
                 'datetime': this.iso8601 (timestamp),
@@ -1106,18 +1106,18 @@ module.exports = class cobinhood extends Exchange {
         if (!Array.isArray (data)) {
             data = [data];
         }
-        let dl = data.length; // Transpiler is bugged
+        const dl = data.length; // Transpiler is bugged
         if (dl !== 1) {
             return undefined;
         }
-        let d = data[dl - 1];
-        let timestamp = parseInt (d[0]);
-        let volume = parseFloat (d[1]);
-        let high = parseFloat (d[2]);
-        let low = parseFloat (d[3]);
-        let open = parseFloat (d[4]);
-        let close = parseFloat (d[5]);
-        let o = [
+        const d = data[dl - 1];
+        const timestamp = parseInt (d[0]);
+        const volume = parseFloat (d[1]);
+        const high = parseFloat (d[2]);
+        const low = parseFloat (d[3]);
+        const open = parseFloat (d[4]);
+        const close = parseFloat (d[5]);
+        const o = [
             timestamp,
             open,
             high,
@@ -1129,12 +1129,12 @@ module.exports = class cobinhood extends Exchange {
     }
 
     _websocketProcessPendingNonces (contextId, nonceKey, event, symbol, success, ex) {
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (nonceKey in symbolData) {
-            let nonces = symbolData[nonceKey];
+            const nonces = symbolData[nonceKey];
             const keys = Object.keys (nonces);
             for (let i = 0; i < keys.length; i++) {
-                let nonce = keys[i];
+                const nonce = keys[i];
                 this._cancelTimeout (nonces[nonce]);
                 this.emit (nonce, success, ex);
             }
@@ -1156,12 +1156,12 @@ module.exports = class cobinhood extends Exchange {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         // save nonce for subscription response
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (!('sub-nonces' in symbolData)) {
             symbolData['sub-nonces'] = {};
         }
         const id = this.marketId (symbol);
-        let payload = {
+        const payload = {
             'action': 'subscribe',
             'trading_pair_id': id,
         };
@@ -1179,8 +1179,8 @@ module.exports = class cobinhood extends Exchange {
             payload['type'] = 'candle';
             payload['timeframe'] = symbolData['timeframe'];
         }
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
         symbolData['sub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         // send request
@@ -1191,12 +1191,12 @@ module.exports = class cobinhood extends Exchange {
         if ((event !== 'ob') && (event !== 'ticker') && (event !== 'trade') && (event !== 'ohlcv')) {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (!('unsub-nonces' in symbolData)) {
             symbolData['unsub-nonces'] = {};
         }
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
         symbolData['unsub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         let type = undefined;
@@ -1218,9 +1218,9 @@ module.exports = class cobinhood extends Exchange {
     }
 
     _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (key in symbolData) {
-            let nonces = symbolData[key];
+            const nonces = symbolData[key];
             if (timerNonce in nonces) {
                 this.omit (symbolData[key], timerNonce);
                 this._contextSetSymbolData (contextId, event, symbol, symbolData);
@@ -1229,7 +1229,7 @@ module.exports = class cobinhood extends Exchange {
     }
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
             return this._cloneOrderBook (data['ob'], limit);
         }

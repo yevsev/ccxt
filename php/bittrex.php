@@ -1359,8 +1359,9 @@ class bittrex extends Exchange {
             $response = json_decode($body, $as_associative_array = true);
             // array("Url":"/signalr","ConnectionToken":"...","ConnectionId":"...","KeepAliveTimeout":20.0,"DisconnectTimeout":30.0,"ConnectionTimeout":110.0,"TryWebSockets":true,"ProtocolVersion":"1.5","TransportConnectTimeout":5.0,"LongPollDelay":0.0)
             $responseUrl = $this->safe_value($response, 'Url');
-            if ($responseUrl !== null)
+            if ($responseUrl !== null) {
                 return $response;
+            }
             // array( $success => false, $message => "$message" )
             $success = $this->safe_value($response, 'success');
             if ($success === null) {

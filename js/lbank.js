@@ -676,26 +676,26 @@ module.exports = class lbank extends Exchange {
     }
 
     _websocketOnMessage (contextId, data) {
-        let msg = JSON.parse (data);
-        let success = this.safeString (msg, 'success');
-        let channel = this.safeString (msg, 'channel');
+        const msg = JSON.parse (data);
+        const success = this.safeString (msg, 'success');
+        const channel = this.safeString (msg, 'channel');
         if (typeof success !== 'undefined') {
             // subscription
-            let parts = channel.split ('_');
-            let partsLen = parts.length;
+            const parts = channel.split ('_');
+            const partsLen = parts.length;
             if (partsLen > 5) {
                 if (parts[5] === 'depth') {
                     // orderbook
-                    let symbol = this.findSymbol (parts[3] + '_' + parts[4]);
+                    const symbol = this.findSymbol (parts[3] + '_' + parts[4]);
                     // try to match with subscription
                     let found = false;
-                    let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+                    const data = this._contextGetSymbolData (contextId, 'ob', symbol);
                     if ('sub-nonces' in data) {
-                        let nonces = data['sub-nonces'];
+                        const nonces = data['sub-nonces'];
                         const keys = Object.keys (nonces);
                         for (let i = 0; i < keys.length; i++) {
                             found = true;
-                            let nonce = keys[i];
+                            const nonce = keys[i];
                             this._cancelTimeout (nonces[nonce]);
                             this.emit (nonce, success === 'true');
                         }
@@ -704,11 +704,11 @@ module.exports = class lbank extends Exchange {
                     // if not found try unsubscription
                     if (!found) {
                         if ('unsub-nonces' in data) {
-                            let nonces = data['unsub-nonces'];
+                            const nonces = data['unsub-nonces'];
                             const keys = Object.keys (nonces);
                             for (let i = 0; i < keys.length; i++) {
                                 found = true;
-                                let nonce = keys[i];
+                                const nonce = keys[i];
                                 this._cancelTimeout (nonces[nonce]);
                                 this.emit (nonce, success === 'true');
                             }
@@ -719,11 +719,11 @@ module.exports = class lbank extends Exchange {
                 }
             }
         } else {
-            let parts = channel.split ('_');
-            let partsLen = parts.length;
+            const parts = channel.split ('_');
+            const partsLen = parts.length;
             if (partsLen > 5) {
                 if (parts[5] === 'depth') {
-                    let symbol = this.findSymbol (parts[3] + '_' + parts[4]);
+                    const symbol = this.findSymbol (parts[3] + '_' + parts[4]);
                     this._websocketHandleOb (contextId, msg, symbol);
                 }
             } else {
@@ -733,8 +733,8 @@ module.exports = class lbank extends Exchange {
     }
 
     _websocketHandleOb (contextId, msg, symbol) {
-        let ob = this.parseOrderBook (msg);
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const ob = this.parseOrderBook (msg);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         data['ob'] = ob;
         this._contextSetSymbolData (contextId, 'ob', symbol, data);
         this.emit ('ob', symbol, this._cloneOrderBook (ob, data['limit']));
@@ -744,18 +744,18 @@ module.exports = class lbank extends Exchange {
         if (event !== 'ob') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let id = this.market_id (symbol);
-        let payload = {
+        const id = this.market_id (symbol);
+        const payload = {
             'event': 'addChannel',
             'channel': 'lh_sub_spot_' + id + '_depth_60',
         };
-        let data = this._contextGetSymbolData (contextId, event, symbol);
+        const data = this._contextGetSymbolData (contextId, event, symbol);
         data['limit'] = this.safeInteger (params, 'limit', undefined);
         if (!('sub-nonces' in data)) {
             data['sub-nonces'] = {};
         }
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonces']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonces']);
         data['sub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, data);
         this.websocketSendJson (payload);
@@ -765,27 +765,27 @@ module.exports = class lbank extends Exchange {
         if (event !== 'ob') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let id = this.market_id (symbol);
-        let payload = {
+        const id = this.market_id (symbol);
+        const payload = {
             'event': 'removeChannel',
             'channel': 'lh_sub_spot_' + id + '_depth_60',
             'id': nonce,
         };
-        let data = this._contextGetSymbolData (contextId, event, symbol);
+        const data = this._contextGetSymbolData (contextId, event, symbol);
         if (!('unsub-nonces' in data)) {
             data['unsub-nonces'] = {};
         }
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
         data['unsub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, data);
         this.websocketSendJson (payload);
     }
 
     _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
-        let data = this._contextGetSymbolData (contextId, event, symbol);
+        const data = this._contextGetSymbolData (contextId, event, symbol);
         if (key in data) {
-            let nonces = data[key];
+            const nonces = data[key];
             if (timerNonce in nonces) {
                 this.omit (data[key], timerNonce);
                 this._contextSetSymbolData (contextId, event, symbol, data);
@@ -794,7 +794,7 @@ module.exports = class lbank extends Exchange {
     }
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
             return this._cloneOrderBook (data['ob'], limit);
         }

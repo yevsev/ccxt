@@ -1611,18 +1611,19 @@ class binance extends Exchange {
                 if ($partsLen === 2) {
                     // $symbol = $this->find_symbol(strtoupper($pair[0]));
                     $event = strtolower($pair[1]);
-                    if ($event === 'depth')
+                    if ($event === 'depth') {
                         $event = 'ob';
-                    else if ($event === 'trade')
+                    } else if ($event === 'trade') {
                         $event = 'trade';
-                    else if ($event === 'aggtrade')
+                    } else if ($event === 'aggtrade') {
                         $event = 'aggtrade';
-                    else if (mb_strpos($event, 'kline') !== false)
+                    } else if (mb_strpos($event, 'kline') !== false) {
                         $event = 'kline';
-                    else if (mb_strpos($event, '24hrTicker') !== false)
+                    } else if (mb_strpos($event, '24hrTicker') !== false) {
                         $event = 'ticker';
                     // $this->_contextSetSubscribed ($contextId, $event, $symbol, true);
                     // $this->_contextSetSubscribing ($contextId, $event, $symbol, false);
+                    }
                 }
             }
         }

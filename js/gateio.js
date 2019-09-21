@@ -812,9 +812,9 @@ module.exports = class gateio extends Exchange {
     }
 
     _websocketOnMessage (contextId, data) {
-        let msg = JSON.parse (data);
-        let oid = this.safeString (msg, 'id');
-        let method = this.safeString (msg, 'method');
+        const msg = JSON.parse (data);
+        const oid = this.safeString (msg, 'id');
+        const method = this.safeString (msg, 'method');
         if (typeof method === 'undefined') {
             // subscription response
             // let status = this.safeString (msg['result'], 'status');
@@ -827,19 +827,19 @@ module.exports = class gateio extends Exchange {
     }
 
     _websocketHandleOb (contextId, msg) {
-        let params = this.safeValue (msg, 'params');
-        let clean = params[0];
+        const params = this.safeValue (msg, 'params');
+        const clean = params[0];
         let ob = params[1];
-        let symbol = this.findSymbol (params[2].toLowerCase ());
+        const symbol = this.findSymbol (params[2].toLowerCase ());
         if (clean) {
             ob = this.parseOrderBook (ob, undefined);
-            let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+            const data = this._contextGetSymbolData (contextId, 'ob', symbol);
             data['ob'] = ob;
             this._contextSetSymbolData (contextId, 'ob', symbol, data);
             this.emit ('ob', symbol, this._cloneOrderBook (ob, data['limit']));
         } else {
-            let data = this._contextGetSymbolData (contextId, 'ob', symbol);
-            let obMerged = this.mergeOrderBookDelta (data['ob'], ob, undefined);
+            const data = this._contextGetSymbolData (contextId, 'ob', symbol);
+            const obMerged = this.mergeOrderBookDelta (data['ob'], ob, undefined);
             data['ob'] = obMerged;
             this._contextSetSymbolData (contextId, 'ob', symbol, data);
             this.emit ('ob', symbol, this._cloneOrderBook (obMerged, data['limit']));
@@ -850,13 +850,13 @@ module.exports = class gateio extends Exchange {
         if (event !== 'ob') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let id = this.market_id (symbol).toUpperCase ();
-        let payload = {
+        const id = this.market_id (symbol).toUpperCase ();
+        const payload = {
             'id': nonce,
             'method': 'depth.subscribe',
             'params': [id, 30, '0.00001'],
         };
-        let data = this._contextGetSymbolData (contextId, event, symbol);
+        const data = this._contextGetSymbolData (contextId, event, symbol);
         data['limit'] = this.safeInteger (params, 'limit', undefined);
         this._contextSetSymbolData (contextId, event, symbol, data);
         this.websocketSendJson (payload);
@@ -866,8 +866,8 @@ module.exports = class gateio extends Exchange {
         if (event !== 'ob') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let id = this.market_id (symbol).toUpperCase ();
-        let payload = {
+        const id = this.market_id (symbol).toUpperCase ();
+        const payload = {
             'id': nonce,
             'method': 'depth.unsubscribe',
             'params': [id],
@@ -876,7 +876,7 @@ module.exports = class gateio extends Exchange {
     }
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
             return this._cloneOrderBook (data['ob'], limit);
         }

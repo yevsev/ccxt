@@ -1024,12 +1024,12 @@ module.exports = class cex extends Exchange {
     }
 
     _websocketOnMessage (contextId, data) {
-        let msg = JSON.parse (data);
-        let e = this.safeString (msg, 'e');
-        let oid = this.safeString (msg, 'oid');
-        let resData = this.safeValue (msg, 'data', {});
+        const msg = JSON.parse (data);
+        const e = this.safeString (msg, 'e');
+        const oid = this.safeString (msg, 'oid');
+        const resData = this.safeValue (msg, 'data', {});
         if (e in this.wsconf['methodmap']) {
-            let method = this.wsconf['methodmap'][e];
+            const method = this.wsconf['methodmap'][e];
             this[method] (contextId, msg, oid, resData);
         }
     }
@@ -1053,46 +1053,46 @@ module.exports = class cex extends Exchange {
 
     _websocketHandleObSubscribe (contextId, msg, oid, resData) {
         if (msg['ok'] === 'ok') {
-            let symbol = resData['pair'].replace (':', '/');
-            let timestamp = resData['timestamp'] * 1000;
-            let ob = this.parseOrderBook (resData, timestamp);
+            const symbol = resData['pair'].replace (':', '/');
+            const timestamp = resData['timestamp'] * 1000;
+            const ob = this.parseOrderBook (resData, timestamp);
             ob['nonce'] = resData['id'];
-            let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+            const data = this._contextGetSymbolData (contextId, 'ob', symbol);
             data['ob'] = ob;
             this._contextSetSymbolData (contextId, 'ob', symbol, data);
             this.emit (oid, true);
             this.emit ('ob', symbol, this._cloneOrderBook (data['ob'], data['limit']));
         } else {
-            let error = new ExchangeError (this.safeString (resData, 'error', 'orderbook error'));
+            const error = new ExchangeError (this.safeString (resData, 'error', 'orderbook error'));
             this.emit (oid, false, error);
         }
     }
 
     _websocketHandleObUnsubscribe (contextId, msg, oid, resData) {
         if (msg['ok'] === 'ok') {
-            let data = this.safeValue (msg, 'data');
+            const data = this.safeValue (msg, 'data');
             if (typeof data !== 'undefined') {
-                let pair = this.safeValue (data, 'pair');
+                const pair = this.safeValue (data, 'pair');
                 if (typeof pair !== 'undefined') {
                     // let symbol = resData['pair'].replace (':', '/');
                     this.emit (oid, true);
                 }
             }
         } else {
-            let error = new ExchangeError (this.safeString (resData, 'error', 'orderbook error'));
+            const error = new ExchangeError (this.safeString (resData, 'error', 'orderbook error'));
             this.emit (oid, false, error);
         }
     }
 
     _websocketHandleObUpdate (contextId, msg, oid, resData) {
-        let symbol = resData['pair'].replace (':', '/');
-        let timestamp = resData['time'];
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const symbol = resData['pair'].replace (':', '/');
+        const timestamp = resData['time'];
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (data['ob']['nonce'] !== (resData['id'] - 1)) {
             this.websocketClose ();
             this.emit ('err', new NetworkError ('invalid orderbook sequence in ' + this.id + ' ' + data['ob']['nonce'] + ' !== ' + resData['id'] + ' -1'));
         } else {
-            let ob = this.mergeOrderBookDelta (data['ob'], resData, timestamp);
+            const ob = this.mergeOrderBookDelta (data['ob'], resData, timestamp);
             ob['nonce'] = resData['id'];
             data['ob'] = ob;
             this._contextSetSymbolData (contextId, 'ob', symbol, data);
@@ -1117,8 +1117,8 @@ module.exports = class cex extends Exchange {
         if (event !== 'ob') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let [currencyBase, currencyQuote] = symbol.split ('/');
-        let data = this._contextGetSymbolData (contextId, event, symbol);
+        const [currencyBase, currencyQuote] = symbol.split ('/');
+        const data = this._contextGetSymbolData (contextId, event, symbol);
         data['limit'] = this.safeValue (params, 'limit');
         this._contextSetSymbolData (contextId, event, symbol, data);
         this.websocketSendJson ({
@@ -1136,7 +1136,7 @@ module.exports = class cex extends Exchange {
         if (event !== 'ob') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let [currencyBase, currencyQuote] = symbol.split ('/');
+        const [currencyBase, currencyQuote] = symbol.split ('/');
         this.websocketSendJson ({
             'e': 'order-book-unsubscribe',
             'data': {
@@ -1147,7 +1147,7 @@ module.exports = class cex extends Exchange {
     }
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
             return this._cloneOrderBook (data['ob'], limit);
         }

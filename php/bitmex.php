@@ -1350,7 +1350,7 @@ class bitmex extends Exchange {
     }
 
     public function _websocket_on_pong ($contextId, $sequence) {
-        var_dump ("PONG " . $sequence);
+        var_dump ('PONG ' . $sequence);
         $sequenceStr = '_' . (string) $sequence;
         $pongTimers = $this->_contextGet ($contextId, 'pongtimers');
         if (is_array($pongTimers) && array_key_exists($sequenceStr, $pongTimers)) {
@@ -1364,13 +1364,13 @@ class bitmex extends Exchange {
 
     public function _websocket_timeout_send_ping ($contextId) {
         $lastSeq = $this->_contextGet ($contextId, 'pingseq');
-        if ($lastSeq === null){
+        if ($lastSeq === null) {
             $lastSeq = 1;
         } else {
             $lastSeq = $lastSeq . 1;
         }
         $sequenceStr = '_' . (string) $lastSeq;
-        var_dump ("PING " . $lastSeq);
+        var_dump ('PING ' . $lastSeq);
         $this->_contextSet ($contextId, 'pingseq', $lastSeq);
         $this->websocketSendPing ($lastSeq);
         $pongTimers = $this->_contextGet ($contextId, 'pongtimers');
@@ -1383,7 +1383,7 @@ class bitmex extends Exchange {
     }
 
     public function _websocket_timeout_pong ($contextId, $sequence) {
-        $this->emit ('err', new ExchangeError ($this->id . ' no pong received for '+ $sequence));
+        $this->emit ('err', new ExchangeError ($this->id . ' no pong received for ' . $sequence));
     }
 
     public function _websocket_handle_error ($contextId, $msg) {

@@ -860,20 +860,20 @@ module.exports = class gdax extends Exchange {
     }
 
     _websocketOnMessage (contextId, data) {
-        let msg = JSON.parse (data);
-        let msgType = this.safeString (msg, 'type');
+        const msg = JSON.parse (data);
+        const msgType = this.safeString (msg, 'type');
         // console.log(msg);
         if (msgType === 'subscriptions') {
-            let channels = this.safeValue (msg, 'channels');
+            const channels = this.safeValue (msg, 'channels');
             let level2Found = false;
             for (let i = 0; i < channels.length; i++) {
-                let channel = channels[i];
-                let channelName = channel['name'];
+                const channel = channels[i];
+                const channelName = channel['name'];
                 if (channelName === 'level2') {
-                    let productIds = channel['product_ids'];
+                    const productIds = channel['product_ids'];
                     level2Found = true;
                     for (let j = 0; j < productIds.length; j++) {
-                        let productId = productIds[j];
+                        const productId = productIds[j];
                         this._websocketHandleSubscription (contextId, 'ob', productId);
                     }
                     this._websocketHandleUnsubscription (contextId, 'ob', productIds);
@@ -890,27 +890,27 @@ module.exports = class gdax extends Exchange {
     }
 
     _websocketHandleObSnapshot (contextId, msg) {
-        let id = this.safeString (msg, 'product_id');
-        let symbol = this.findSymbol (id);
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
-        let ob = this.parseOrderBook (msg);
+        const id = this.safeString (msg, 'product_id');
+        const symbol = this.findSymbol (id);
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const ob = this.parseOrderBook (msg);
         symbolData['ob'] = ob;
         this.emit ('ob', symbol, this._cloneOrderBook (ob, symbolData['limit']));
         this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
     }
 
     _websocketHandleObUpdate (contextId, msg) {
-        let id = this.safeString (msg, 'product_id');
-        let symbol = this.findSymbol (id);
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
-        let ob = symbolData['ob'];
-        let changes = this.safeValue (msg, 'changes', []);
+        const id = this.safeString (msg, 'product_id');
+        const symbol = this.findSymbol (id);
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const ob = symbolData['ob'];
+        const changes = this.safeValue (msg, 'changes', []);
         for (let i = 0; i < changes.length; i++) {
-            let change = changes[i];
-            let op = change[0];
-            let price = parseFloat (change[1]);
-            let amount = parseFloat (change[2]);
-            let side = (op === 'sell') ? 'asks' : 'bids';
+            const change = changes[i];
+            const op = change[0];
+            const price = parseFloat (change[1]);
+            const amount = parseFloat (change[2]);
+            const side = (op === 'sell') ? 'asks' : 'bids';
             this.updateBidAsk ([price, amount], ob[side], op === 'buy');
         }
         symbolData['ob'] = ob;
@@ -919,13 +919,13 @@ module.exports = class gdax extends Exchange {
     }
 
     _websocketHandleSubscription (contextId, event, msg) {
-        let symbol = this.findSymbol (msg);
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbol = this.findSymbol (msg);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if ('sub-nonces' in symbolData) {
-            let nonces = symbolData['sub-nonces'];
+            const nonces = symbolData['sub-nonces'];
             const keys = Object.keys (nonces);
             for (let i = 0; i < keys.length; i++) {
-                let nonce = keys[i];
+                const nonce = keys[i];
                 this._cancelTimeout (nonces[nonce]);
                 this.emit (nonce, true);
             }
@@ -938,16 +938,16 @@ module.exports = class gdax extends Exchange {
         let symbols = this._contextGetSymbols (contextId, event);
         symbols = Object.keys (symbols);
         for (let i = 0; i < symbols.length; i++) {
-            let symbol = symbols[i];
+            const symbol = symbols[i];
             // if symbol not in subscribed symbols
-            let id = this.marketId (symbol);
+            const id = this.marketId (symbol);
             if (!this.inArray (id, idsSubscribed)) {
-                let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+                const symbolData = this._contextGetSymbolData (contextId, event, symbol);
                 if ('unsub-nonces' in symbolData) {
-                    let nonces = symbolData['unsub-nonces'];
+                    const nonces = symbolData['unsub-nonces'];
                     const keys = Object.keys (nonces);
                     for (let i = 0; i < keys.length; i++) {
-                        let nonce = keys[i];
+                        const nonce = keys[i];
                         this._cancelTimeout (nonces[nonce]);
                         this.emit (nonce, true);
                     }
@@ -963,13 +963,13 @@ module.exports = class gdax extends Exchange {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         // save nonce for subscription response
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (!('sub-nonces' in symbolData)) {
             symbolData['sub-nonces'] = {};
         }
         symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
         symbolData['sub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         // send request
@@ -985,27 +985,27 @@ module.exports = class gdax extends Exchange {
         if (event !== 'ob') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let id = this.market_id (symbol);
-        let payload = {
+        const id = this.market_id (symbol);
+        const payload = {
             'type': 'unsubscribe',
             'product_ids': [id],
             'channels': ['level2'],
         };
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (!('unsub-nonces' in symbolData)) {
             symbolData['unsub-nonces'] = {};
         }
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
         symbolData['unsub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         this.websocketSendJson (payload);
     }
 
     _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (key in symbolData) {
-            let nonces = symbolData[key];
+            const nonces = symbolData[key];
             if (timerNonce in nonces) {
                 this.omit (symbolData[key], timerNonce);
                 this._contextSetSymbolData (contextId, event, symbol, symbolData);
@@ -1014,7 +1014,7 @@ module.exports = class gdax extends Exchange {
     }
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
             return this._cloneOrderBook (data['ob'], limit);
         }

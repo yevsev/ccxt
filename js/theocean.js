@@ -950,10 +950,10 @@ module.exports = class theocean extends Exchange {
     }
 
     _websocketOnMessage (contextId, data) {
-        let msg = JSON.parse (data);
-        let evtData = msg[1];
-        let type = this.safeString (evtData, 'type');
-        let channel = this.safeString (evtData, 'channel');
+        const msg = JSON.parse (data);
+        const evtData = msg[1];
+        const type = this.safeString (evtData, 'type');
+        const channel = this.safeString (evtData, 'channel');
         if (channel === 'order_book') {
             if (type === 'snapshot') {
                 this._websocketHandleObSnapshot (contextId, evtData);
@@ -964,7 +964,7 @@ module.exports = class theocean extends Exchange {
     }
 
     _websocketGetSymbolFrom (baseId, quoteId) {
-        let marketId = baseId + '/' + quoteId;
+        const marketId = baseId + '/' + quoteId;
         let market = undefined;
         if (marketId in this.markets_by_id) {
             market = this.markets_by_id[marketId];
@@ -974,32 +974,32 @@ module.exports = class theocean extends Exchange {
     }
 
     _websocketHandleObSnapshot (contextId, msg) {
-        let channelId = this.safeString (msg, 'channelId');
-        let parts = channelId.split ('_');
-        let baseId = parts[2];
-        let quoteId = parts[3];
-        let symbol = this._websocketGetSymbolFrom (baseId, quoteId);
+        const channelId = this.safeString (msg, 'channelId');
+        const parts = channelId.split ('_');
+        const baseId = parts[2];
+        const quoteId = parts[3];
+        const symbol = this._websocketGetSymbolFrom (baseId, quoteId);
         this._websocketHandleSubscription (contextId, 'ob', symbol);
-        let payload = this.safeValue (msg, 'payload');
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
-        let market = this.market (symbol);
-        let ob = this.parseOrderBook (payload, undefined, 'bids', 'asks', 'price', 'availableAmount', market);
+        const payload = this.safeValue (msg, 'payload');
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const market = this.market (symbol);
+        const ob = this.parseOrderBook (payload, undefined, 'bids', 'asks', 'price', 'availableAmount', market);
         symbolData['ob'] = ob;
         this.emit ('ob', symbol, this._cloneOrderBook (ob, symbolData['limit']));
         this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
     }
 
     _websocketHandleObUpdate (contextId, msg) {
-        let channelId = this.safeString (msg, 'channelId');
-        let parts = channelId.split ('_');
-        let baseId = parts[2];
-        let quoteId = parts[3];
-        let symbol = this._websocketGetSymbolFrom (baseId, quoteId);
-        let payload = this.safeValue (msg, 'payload');
-        let market = this.market (symbol);
-        let obUpdate = this.parseOrderBook (payload, undefined, 'bids', 'asks', 'price', 'availableAmount', market);
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
-        let ob = symbolData['ob'];
+        const channelId = this.safeString (msg, 'channelId');
+        const parts = channelId.split ('_');
+        const baseId = parts[2];
+        const quoteId = parts[3];
+        const symbol = this._websocketGetSymbolFrom (baseId, quoteId);
+        const payload = this.safeValue (msg, 'payload');
+        const market = this.market (symbol);
+        const obUpdate = this.parseOrderBook (payload, undefined, 'bids', 'asks', 'price', 'availableAmount', market);
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const ob = symbolData['ob'];
         for (let i = 0; i < obUpdate['bids'].length; i++) {
             this.updateBidAsk (obUpdate['bids'][i], ob['bids'], true);
         }
@@ -1012,12 +1012,12 @@ module.exports = class theocean extends Exchange {
     }
 
     _websocketHandleSubscription (contextId, event, symbol) {
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if ('sub-nonces' in symbolData) {
-            let nonces = symbolData['sub-nonces'];
+            const nonces = symbolData['sub-nonces'];
             const keys = Object.keys (nonces);
             for (let i = 0; i < keys.length; i++) {
-                let nonce = keys[i];
+                const nonce = keys[i];
                 this._cancelTimeout (nonces[nonce]);
                 this.emit (nonce, true);
             }
@@ -1031,17 +1031,17 @@ module.exports = class theocean extends Exchange {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         // save nonce for subscription response
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (!('sub-nonces' in symbolData)) {
             symbolData['sub-nonces'] = {};
         }
         symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
         symbolData['sub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         // send request
-        let market = this.market (symbol);
+        const market = this.market (symbol);
         this.websocketSendJson ([
             'data', {
                 'type': 'subscribe',
@@ -1061,9 +1061,9 @@ module.exports = class theocean extends Exchange {
     }
 
     _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (key in symbolData) {
-            let nonces = symbolData[key];
+            const nonces = symbolData[key];
             if (timerNonce in nonces) {
                 this.omit (symbolData[key], timerNonce);
                 this._contextSetSymbolData (contextId, event, symbol, symbolData);
@@ -1072,7 +1072,7 @@ module.exports = class theocean extends Exchange {
     }
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
             return this._cloneOrderBook (data['ob'], limit);
         }

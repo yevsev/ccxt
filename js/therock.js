@@ -1254,10 +1254,10 @@ module.exports = class therock extends Exchange {
     }
 
     _websocketOnMessage (contextId, data) {
-        let msg = JSON.parse (data);
+        const msg = JSON.parse (data);
         // console.log(data);
         this._websocketCheckSequence (contextId, msg);
-        let evt = this.safeString (msg, 'event');
+        const evt = this.safeString (msg, 'event');
         if (evt === 'subscription_succeeded') {
             this._websocketHandleSubscription (contextId, msg);
         } else if (evt === 'orderbook') {
@@ -1268,15 +1268,15 @@ module.exports = class therock extends Exchange {
     }
 
     _websocketCheckSequence (contextId, msg) {
-        let msgData = this.safeValue (msg, 'data');
+        const msgData = this.safeValue (msg, 'data');
         if (typeof msgData === 'undefined') {
             return;
         }
-        let sequeceId = this.safeInteger (msgData, 'sequence');
+        const sequeceId = this.safeInteger (msgData, 'sequence');
         if (typeof sequeceId === 'undefined') {
             return;
         }
-        let chan = this.safeString (msg, 'channel');
+        const chan = this.safeString (msg, 'channel');
         let lastSeqIdData = this._contextGet (contextId, 'sequence');
         if (typeof lastSeqIdData === 'undefined') {
             lastSeqIdData = {};
@@ -1294,31 +1294,31 @@ module.exports = class therock extends Exchange {
     }
 
     _websocketHandleOrderbook (contextId, msg) {
-        let chan = this.safeString (msg, 'channel');
-        let symbol = this.findSymbol (chan);
-        let data = this.safeValue (msg, 'data');
-        let time = this.safeString (data, 'time');
-        let timestamp = this.parse8601 (time);
-        let ob = this.parseOrderBook (data, timestamp, 'bids', 'asks', 'price', 'amount');
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const chan = this.safeString (msg, 'channel');
+        const symbol = this.findSymbol (chan);
+        const data = this.safeValue (msg, 'data');
+        const time = this.safeString (data, 'time');
+        const timestamp = this.parse8601 (time);
+        const ob = this.parseOrderBook (data, timestamp, 'bids', 'asks', 'price', 'amount');
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         symbolData['ob'] = ob;
         this.emit ('ob', symbol, this._cloneOrderBook (ob, symbolData['limit']));
         this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
     }
 
     _websocketHandleOrderbookDiff (contextId, msg) {
-        let chan = this.safeString (msg, 'channel');
-        let symbol = this.findSymbol (chan);
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const chan = this.safeString (msg, 'channel');
+        const symbol = this.findSymbol (chan);
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (!('ob' in symbolData)) {
             // not previous snapshot -> don't process it
             return;
         }
-        let data = this.safeValue (msg, 'data');
-        let time = this.safeString (data, 'time');
-        let timestamp = this.parse8601 (time);
-        let price = this.safeFloat (data, 'price');
-        let amount = this.safeFloat (data, 'amount');
+        const data = this.safeValue (msg, 'data');
+        const time = this.safeString (data, 'time');
+        const timestamp = this.parse8601 (time);
+        const price = this.safeFloat (data, 'price');
+        const amount = this.safeFloat (data, 'amount');
         let side = this.safeString (data, 'side');
         side = (side === 'bid') ? 'bids' : 'asks';
         this.updateBidAsk ([price, amount], symbolData['ob'][side], side === 'bids');
@@ -1329,18 +1329,18 @@ module.exports = class therock extends Exchange {
     }
 
     _websocketHandleSubscription (contextId, msg) {
-        let chan = this.safeString (msg, 'channel');
+        const chan = this.safeString (msg, 'channel');
         let event = 'ob';
         if (chan === 'currency') {
             event = 'trade';
         }
-        let symbol = this.findSymbol (chan);
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbol = this.findSymbol (chan);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if ('sub-nonces' in symbolData) {
-            let nonces = symbolData['sub-nonces'];
+            const nonces = symbolData['sub-nonces'];
             const keys = Object.keys (nonces);
             for (let i = 0; i < keys.length; i++) {
-                let nonce = keys[i];
+                const nonce = keys[i];
                 this._cancelTimeout (nonces[nonce]);
                 this.emit (nonce, true);
             }
@@ -1354,17 +1354,17 @@ module.exports = class therock extends Exchange {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         // save nonce for subscription response
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (!('sub-nonces' in symbolData)) {
             symbolData['sub-nonces'] = {};
         }
         symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        const nonceStr = nonce.toString ();
+        const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
         symbolData['sub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         // remove sequenceId
-        let sequenceId = undefined;
+        const sequenceId = undefined;
         this._contextSet (contextId, 'sequence', sequenceId);
         // send request
         const id = this.marketId (symbol);
@@ -1378,20 +1378,20 @@ module.exports = class therock extends Exchange {
         if (event !== 'ob') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        let id = this.market_id (symbol);
-        let payload = {
+        const id = this.market_id (symbol);
+        const payload = {
             'event': 'unsubscribe',
             'channel': id,
         };
-        let nonceStr = nonce.toString ();
+        const nonceStr = nonce.toString ();
         this.websocketSendJson (payload);
         this.emit (nonceStr, true);
     }
 
     _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (key in symbolData) {
-            let nonces = symbolData[key];
+            const nonces = symbolData[key];
             if (timerNonce in nonces) {
                 this.omit (symbolData[key], timerNonce);
                 this._contextSetSymbolData (contextId, event, symbol, symbolData);
@@ -1400,7 +1400,7 @@ module.exports = class therock extends Exchange {
     }
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
             return this._cloneOrderBook (data['ob'], limit);
         }

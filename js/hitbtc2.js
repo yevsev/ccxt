@@ -1517,9 +1517,9 @@ module.exports = class hitbtc2 extends hitbtc {
     }
 
     _websocketOnMessage (contextId, data) {
-        let msg = JSON.parse (data);
+        const msg = JSON.parse (data);
         // TODO: if (msg.error) error handle
-        let method = this.safeString (msg, 'method');
+        const method = this.safeString (msg, 'method');
         if (typeof method !== 'undefined') {
             if (method === 'snapshotOrderbook') {
                 // const orderbook = msg.params;
@@ -1542,13 +1542,13 @@ module.exports = class hitbtc2 extends hitbtc {
 
     _websocketHandleActiveOrders (contextId, data) {
         const oddata = this.safeValue (data, 'params');
-        let od = this._contextGetSymbolData (contextId, 'od', 'all');
+        const od = this._contextGetSymbolData (contextId, 'od', 'all');
         if (od['od'] === undefined && oddata.length > 0) {
             od['od'] = {};
         }
         for (let j = 0; j < oddata.length; j++) {
-            let order = this.parseOrder (oddata[j]);
-            let orderid = order['id'];
+            const order = this.parseOrder (oddata[j]);
+            const orderid = order['id'];
             od['od'][orderid] = order;
         }
         od['rawData'] = oddata;
@@ -1558,10 +1558,10 @@ module.exports = class hitbtc2 extends hitbtc {
 
     _websocketHandleReport (contextId, data) {
         const oddata = this.safeValue (data, 'params');
-        let od = this._contextGetSymbolData (contextId, 'od', 'all');
+        const od = this._contextGetSymbolData (contextId, 'od', 'all');
         // status, new, canceled, expired, suspended, trade, replaced
-        let order = this.parseOrder (oddata);
-        let orderid = order['id'];
+        const order = this.parseOrder (oddata);
+        const orderid = order['id'];
         od['od'][orderid] = order;
         if (oddata['reportType'] === 'replaced') {
             delete od['od'][oddata['originalRequestClientOrderId']];
@@ -1574,12 +1574,12 @@ module.exports = class hitbtc2 extends hitbtc {
         const timestamp = undefined;
         const obdata = this.safeValue (data, 'params');
         const rawsymbol = this.safeValue (obdata, 'symbol');
-        let market = this.markets_by_id[rawsymbol];
+        const market = this.markets_by_id[rawsymbol];
         const symbol = market['symbol'];
         // :parse orderbook
-        let ob = this.parseOrderBook (obdata, timestamp, 'bid', 'ask', 'price', 'size');
+        const ob = this.parseOrderBook (obdata, timestamp, 'bid', 'ask', 'price', 'size');
         // console.log('parsed',ob);
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         symbolData['ob'] = ob;
         symbolData['rawData'] = obdata;
         this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
@@ -1621,9 +1621,9 @@ module.exports = class hitbtc2 extends hitbtc {
         const timestamp = undefined;
         const obdata = this.safeValue (data, 'params');
         const rawsymbol = this.safeValue (obdata, 'symbol');
-        let market = this.markets_by_id[rawsymbol];
+        const market = this.markets_by_id[rawsymbol];
         const symbol = market['symbol'];
-        let symbolData = this._contextGetSymbolData (
+        const symbolData = this._contextGetSymbolData (
             contextId,
             'ob',
             symbol
@@ -1636,7 +1636,7 @@ module.exports = class hitbtc2 extends hitbtc {
         rawData['bid'] = this._websocketUpdateOrder (rawData['bid'], obdata['bid']);
         // console.log('updated raw',rawData,obdata);
         // :parse orderbook
-        let ob = this.parseOrderBook (rawData, timestamp, 'bid', 'ask', 'price', 'size');
+        const ob = this.parseOrderBook (rawData, timestamp, 'bid', 'ask', 'price', 'size');
         // console.log('parsed',ob);
         // :update last raw ob
         symbolData['ob'] = ob;
@@ -1650,7 +1650,7 @@ module.exports = class hitbtc2 extends hitbtc {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         if (event === 'ob') {
-            let data = this._contextGetSymbolData (contextId, event, symbol);
+            const data = this._contextGetSymbolData (contextId, event, symbol);
             // depth from 0 to 5
             // see https://github.com/huobiapi/API_Docs/wiki/WS_api_reference#%E8%AE%A2%E9%98%85-market-depth-%E6%95%B0%E6%8D%AE-marketsymboldepthtype
             data['depth'] = this.safeInteger (params, 'depth', '50');
@@ -1669,7 +1669,7 @@ module.exports = class hitbtc2 extends hitbtc {
             this.websocketSendJson (sendJson);
         }
         if (event === 'od') { // Connect using ApiKey/Secret to get order report
-            let data = this._contextGetSymbolData (contextId, event, 'all');
+            const data = this._contextGetSymbolData (contextId, event, 'all');
             data['od'] = undefined;
             this._contextSetSymbolData (contextId, event, 'all', data);
             const sendLoginJson = {
@@ -1687,7 +1687,7 @@ module.exports = class hitbtc2 extends hitbtc {
             };
             this.websocketSendJson (sendJson);
         }
-        let nonceStr = nonce.toString ();
+        const nonceStr = nonce.toString ();
         this.emit (nonceStr, true);
     }
 
@@ -1705,12 +1705,12 @@ module.exports = class hitbtc2 extends hitbtc {
             'id': rawsymbol,
         };
         this.websocketSendJson (sendJson);
-        let nonceStr = nonce.toString ();
+        const nonceStr = nonce.toString ();
         this.emit (nonceStr, true);
     }
 
     _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
-        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const data = this._contextGetSymbolData (contextId, 'ob', symbol);
         if ('ob' in data && typeof data['ob'] !== 'undefined') {
             return this._cloneOrderBook (data['ob'], limit);
         }
@@ -1718,7 +1718,7 @@ module.exports = class hitbtc2 extends hitbtc {
     }
 
     _getCurrentOrders (contextId, orderid) {
-        let data = this._contextGetSymbolData (contextId, 'od', 'all');
+        const data = this._contextGetSymbolData (contextId, 'od', 'all');
         if ('od' in data && typeof data['od'] !== 'undefined') {
             return this._cloneOrders (data['od'], orderid);
         }
