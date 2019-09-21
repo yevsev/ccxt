@@ -1383,7 +1383,7 @@ module.exports = class bitmex extends Exchange {
     }
 
     _websocketTimeoutPong (contextId, sequence) {
-        this.emit ('err', new ExchangeError (this.id + ' no pong received for ' + sequence));
+        this.emit ('err', new ExchangeError (this.id + ' no pong received for ' + sequence), contextId);
     }
 
     _websocketHandleError (contextId, msg) {

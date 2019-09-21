@@ -1383,7 +1383,7 @@ class bitmex extends Exchange {
     }
 
     public function _websocket_timeout_pong ($contextId, $sequence) {
-        $this->emit ('err', new ExchangeError ($this->id . ' no pong received for ' . $sequence));
+        $this->emit ('err', new ExchangeError ($this->id . ' no pong received for ' . $sequence), $contextId);
     }
 
     public function _websocket_handle_error ($contextId, $msg) {
