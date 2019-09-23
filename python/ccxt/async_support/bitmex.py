@@ -1293,6 +1293,13 @@ class bitmex (Exchange):
         lastTimer = self._setTimeout(contextId, 6000, self._websocketMethodMap('_websocketTimeoutSendPing'), [contextId])
         self._contextSet(contextId, 'timer', lastTimer)
 
+    def _websocket_on_close(self, contextId):
+        lastTimer = self._contextGet(contextId, 'timer')
+        if lastTimer is not None:
+            self._cancelTimeout(lastTimer)
+        lastTimer = None
+        self._contextSet(contextId, 'timer', lastTimer)
+
     def _websocket_handle_subscription(self, contextId, msg):
         success = self.safe_value(msg, 'success')
         subscribe = self.safe_string(msg, 'subscribe')

@@ -3248,7 +3248,7 @@ abstract class Exchange extends CcxtEventEmitter {
         $websocketConxInfo = &$this->_contextGetConnectionInfo($conxid);
         $websocketConxInfo['conx']->close();
         // ensure invoke close
-        $this->_websocketOnClose($conxid);
+        $this->_websocket_on_close($conxid);
     }
 
     public function websocketCloseAll (){

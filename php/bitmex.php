@@ -1402,6 +1402,15 @@ class bitmex extends Exchange {
         $this->_contextSet ($contextId, 'timer', $lastTimer);
     }
 
+    public function _websocket_on_close ($contextId) {
+        $lastTimer = $this->_contextGet ($contextId, 'timer');
+        if ($lastTimer !== null) {
+            $this->_cancelTimeout ($lastTimer);
+        }
+        $lastTimer = null;
+        $this->_contextSet ($contextId, 'timer', $lastTimer);
+    }
+
     public function _websocket_handle_subscription ($contextId, $msg) {
         $success = $this->safe_value($msg, 'success');
         $subscribe = $this->safe_string($msg, 'subscribe');

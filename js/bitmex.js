@@ -1402,6 +1402,15 @@ module.exports = class bitmex extends Exchange {
         this._contextSet (contextId, 'timer', lastTimer);
     }
 
+    _websocketOnClose (contextId) {
+        let lastTimer = this._contextGet (contextId, 'timer');
+        if (typeof lastTimer !== 'undefined') {
+            this._cancelTimeout (lastTimer);
+        }
+        lastTimer = undefined;
+        this._contextSet (contextId, 'timer', lastTimer);
+    }
+
     _websocketHandleSubscription (contextId, msg) {
         const success = this.safeValue (msg, 'success');
         const subscribe = this.safeString (msg, 'subscribe');
