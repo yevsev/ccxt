@@ -1367,7 +1367,7 @@ class bitmex extends Exchange {
         if ($lastSeq === null) {
             $lastSeq = 1;
         } else {
-            $lastSeq = $lastSeq . 1;
+            $lastSeq++;
         }
         $sequenceStr = '_' . (string) $lastSeq;
         var_dump ('PING ' . $lastSeq);
