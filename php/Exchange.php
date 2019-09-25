@@ -2885,9 +2885,9 @@ abstract class Exchange extends CcxtEventEmitter {
             foreach (array_keys ($events) as $key) {
                 $event = &$events[$key];
                 foreach ($event as $symbol => $symbolContext) {
-                    $event[$symbol]['subscribed'] = false;
-                    $event[$symbol]['subscribing'] = false;
-                    $event[$symbol]['data'] = array();
+                    $this->websocketContexts[$conxid]["events"][$key][$symbol]['subscribed'] = false;
+                    $this->websocketContexts[$conxid]["events"][$key][$symbol]['subscribing'] = false;
+                    $this->websocketContexts[$conxid]["events"][$key][$symbol]['data'] = array();
                 }
             }
         }
@@ -3258,9 +3258,9 @@ abstract class Exchange extends CcxtEventEmitter {
     }
 
     public function websocketCleanContext($conxid = null){
-        if (conxid == null){
+        if ($conxid == null){
             foreach ($this->websocketContexts as $conxid => $value) {
-                $this->_websocket_reset_context(conxid);
+                $this->_websocket_reset_context($conxid);
             }
         } else {
             $this->_websocket_reset_context($conxid);
