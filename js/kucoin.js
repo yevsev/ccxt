@@ -1678,7 +1678,7 @@ module.exports = class kucoin extends Exchange {
             const nonceId = this.safeInteger (msg, 'id', undefined);
             const code = this.safeInteger (msg, 'code');
             const error = this.safeString (msg, 'data');
-            const ex = new NetworkError (error + ' ('+ code + ')');
+            const ex = new NetworkError (error + ' (' + code + ')');
             if (nonceId !== undefined) {
                 const nonceIdStr = nonceId.toString ();
                 this.emit (nonceIdStr, false, ex);

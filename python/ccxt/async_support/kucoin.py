@@ -1566,7 +1566,7 @@ class kucoin (Exchange):
             nonceId = self.safe_integer(msg, 'id', None)
             code = self.safe_integer(msg, 'code')
             error = self.safe_string(msg, 'data')
-            ex = NetworkError(error + '('+ code + ')')
+            ex = NetworkError(error + '(' + code + ')')
             if nonceId is not None:
                 nonceIdStr = str(nonceId)
                 self.emit(nonceIdStr, False, ex)

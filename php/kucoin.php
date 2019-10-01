@@ -1679,7 +1679,7 @@ class kucoin extends Exchange {
             $nonceId = $this->safe_integer($msg, 'id', null);
             $code = $this->safe_integer($msg, 'code');
             $error = $this->safe_string($msg, 'data');
-            $ex = new NetworkError ($error . ' ('+ $code . ')');
+            $ex = new NetworkError ($error . ' (' . $code . ')');
             if ($nonceId !== null) {
                 $nonceIdStr = (string) $nonceId;
                 $this->emit ($nonceIdStr, false, $ex);
