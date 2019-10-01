@@ -1493,6 +1493,7 @@ class kucoin (Exchange):
             'pingInterval': server['pingInterval'],
             'pingTimeout': server['pingTimeout'],
             'token': response['data']['token'],
+        }
         return websocketConexConfig
 
     def _websocket_on_open(self, contextId, websocketOptions):
@@ -1510,8 +1511,6 @@ class kucoin (Exchange):
         self._contextSet(contextId, 'timer', pingTimer)
 
     def _websocket_restart_ping_timer(self, contextId, pingInterval, pingTimeout):
-        print("PingInterval:" + pingInterval)
-        print("pingTimeout:" + pingTimeout)
         # reset ping timer
         pingTimer = self._contextGet(contextId, 'pingTimer')
         if pingTimer is not None:
@@ -1524,9 +1523,8 @@ class kucoin (Exchange):
         pingSeqStr = str(pingSeq)
         data = {
             'id': pingSeqStr,
-            'type': "ping",
+            'type': 'ping',
         }
-        print("PING:" + pingSeq)
         self.websocketSendJson(data, contextId)
         pongTimers = self._contextGet(contextId, 'pongtimers')
         if pongTimers is None:
@@ -1544,14 +1542,13 @@ class kucoin (Exchange):
         msgType = self.safe_string(msg, 'type')
         if msgType == 'message':
             subject = self.safe_string(msg, 'subject')
-            #if subject == 'trade.l3match':
-            if (subject.find('trade.l3') == 0){
+            # if subject == 'trade.l3match':
+            if subject.find('trade.l3') == 0:
                 self._websocket_handle_trade(contextId, msg)
             elif subject == 'trade.l2update':
                 self._websocket_handle_ob(contextId, msg)
         elif msgType == 'pong':
             pingSeq = self.safe_integer(msg, 'id')
-            print("PONG:" + pingSeq)
             pongTimers = self._contextGet(contextId, 'pongtimers')
             if pingSeq in pongTimers:
                 timer = pongTimers[pingSeq]
@@ -1567,8 +1564,6 @@ class kucoin (Exchange):
             self.emit(nonceIdStr, True)
         elif msgType == 'welcome':
             self.emit('welcome', True)
-        else:
-            print(data)
 
     def _websocket_handle_trade(self, contextId, msg):
         # check sequence
@@ -1585,9 +1580,9 @@ class kucoin (Exchange):
         if subject == 'trade.l3match':
             # trade
             if data['side'] == 'sell':
-                data['orderId'] = data['makerOrderId']; 
+                data['orderId'] = data['makerOrderId']
             else:
-                data['orderId'] = data['takerOrderId']; 
+                data['orderId'] = data['takerOrderId']
             trade = self.parse_trade(data)
             trade['info'] = msg
             trade['type'] = None
@@ -1642,7 +1637,7 @@ class kucoin (Exchange):
     def _websocket_process_first_order_book(self, ob, contextId, symbol, restRequestMs):
         # ob = await self.fetch_order_book(symbol)
         symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
-        if not 'restRequestMs' in symbolData:
+        if not('restRequestMs' in list(symbolData.keys())):
             # not current request
             return
         if symbolData['restRequestMs'] != restRequestMs:
@@ -1699,20 +1694,20 @@ class kucoin (Exchange):
         symbolData = self._contextGetSymbolData(contextId, event, symbol)
         if event == 'ob':
             payload = {
-                "id": nonce,                          
-                "type": "subscribe",
-                "topic": "/market/level2:" + id,
-                "response": True                              
+                'id': nonce,
+                'type': 'subscribe',
+                'topic': '/market/level2:' + id,
+                'response': True,
             }
             symbolData['limit'] = self.safe_integer(params, 'limit', None)
         elif event == 'trade':
             payload = {
-                "id": nonce,                          
-                "type": "subscribe",
-                #"topic": "/market/match:" + id,
-                "topic": "/market/level3:" + id,
-                "privateChannel": False,                      
-                "response": True                              
+                'id': nonce,
+                'type': 'subscribe',
+                # 'topic': '/market/match:' + id,
+                'topic': '/market/level3:' + id,
+                'privateChannel': False,
+                'response': True,
             }
         self._contextSetSymbolData(contextId, event, symbol, symbolData)
         self.websocketSendJson(payload)
@@ -1724,18 +1719,18 @@ class kucoin (Exchange):
         payload = None
         if event == 'ob':
             payload = {
-                "id": nonce,                          
-                "type": "unsubscribe",
-                "topic": "/market/level2:" + id,
-                "response": True                              
+                'id': nonce,
+                'type': 'unsubscribe',
+                'topic': '/market/level2:' + id,
+                'response': True,
             }
         elif event == 'trade':
             payload = {
-                "id": nonce,                          
-                "type": "unsubscribe",
-                #"topic": "/market/match:" + id,
-                "topic": "/market/level3:" + id,
-                "privateChannel": False,                      
-                "response": True                              
+                'id': nonce,
+                'type': 'unsubscribe',
+                # 'topic': '/market/match:' + id,
+                'topic': '/market/level3:' + id,
+                'privateChannel': False,
+                'response': True,
             }
         self.websocketSendJson(payload)

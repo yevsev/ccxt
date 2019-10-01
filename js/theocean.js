@@ -939,7 +939,7 @@ module.exports = class theocean extends Exchange {
     }
 
     async request (path, api = 'public', method = 'GET', params = {}, headers = undefined, body = undefined) {
-        let response = await this.fetch2 (path, api, method, params, headers, body);
+        const response = await this.fetch2 (path, api, method, params, headers, body);
         if (typeof response !== 'string') {
             throw new ExchangeError (this.id + ' returned a non-string response: ' + response.toString ());
         }

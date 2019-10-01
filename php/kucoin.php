@@ -1587,15 +1587,15 @@ class kucoin extends Exchange {
     }
 
     public function _websocket_on_init ($contextId, $websocketConexConfig) {
-        $response = $this->publicPostBulletPublic();
+        $response = $this->publicPostBulletPublic ();
         $server = $response['data']['instanceServers'][0];
         $websocketConexConfig['baseurl'] = $server['endpoint'];
         $websocketConexConfig['url'] = $server['endpoint'] . '?token=' . $response['data']['token'] . '&acceptUserMessage=true';
-        $websocketConexConfig['session'] = {
+        $websocketConexConfig['session'] = array (
             'pingInterval' => $server['pingInterval'],
             'pingTimeout' => $server['pingTimeout'],
             'token' => $response['data']['token'],
-        }
+        );
         return $websocketConexConfig;
     }
 
@@ -1617,8 +1617,6 @@ class kucoin extends Exchange {
     }
 
     public function _websocket_restart_ping_timer ($contextId, $pingInterval, $pingTimeout) {
-        var_dump ("PingInterval:" . $pingInterval);
-        var_dump ("$pingTimeout:" . $pingTimeout);
         // reset ping timer
         $pingTimer = $this->_contextGet ($contextId, 'pingTimer');
         if ($pingTimer !== null) {
@@ -1633,9 +1631,8 @@ class kucoin extends Exchange {
         $pingSeqStr = (string) $pingSeq;
         $data = array (
             'id' => $pingSeqStr,
-            'type' => "ping",
+            'type' => 'ping',
         );
-        var_dump ("PING:" . $pingSeq);
         $this->websocketSendJson ($data, $contextId);
         $pongTimers = $this->_contextGet ($contextId, 'pongtimers');
         if ($pongTimers === null) {
@@ -1656,15 +1653,14 @@ class kucoin extends Exchange {
         $msgType = $this->safe_string($msg, 'type');
         if ($msgType === 'message') {
             $subject = $this->safe_string($msg, 'subject');
-            //if ($subject === 'trade.l3match') {
-            if (mb_strpos($subject, 'trade.l3') === 0){
+            // if ($subject === 'trade.l3match') {
+            if (mb_strpos($subject, 'trade.l3') === 0) {
                 $this->_websocket_handle_trade ($contextId, $msg);
             } else if ($subject === 'trade.l2update') {
                 $this->_websocket_handle_ob ($contextId, $msg);
             }
         } else if ($msgType === 'pong') {
             $pingSeq = $this->safe_integer($msg, 'id');
-            var_dump ("PONG:" . $pingSeq);
             $pongTimers = $this->_contextGet ($contextId, 'pongtimers');
             if (is_array($pongTimers) && array_key_exists($pingSeq, $pongTimers)) {
                 $timer = $pongTimers[$pingSeq];
@@ -1681,8 +1677,6 @@ class kucoin extends Exchange {
             $this->emit ($nonceIdStr, true);
         } else if ($msgType === 'welcome') {
             $this->emit ('welcome', true);
-        } else {
-            var_dump ($data);
         }
     }
 
@@ -1703,9 +1697,9 @@ class kucoin extends Exchange {
         if ($subject === 'trade.l3match') {
             // $trade
             if ($data['side'] === 'sell') {
-                $data['orderId'] = $data['makerOrderId']; 
+                $data['orderId'] = $data['makerOrderId'];
             } else {
-                $data['orderId'] = $data['takerOrderId']; 
+                $data['orderId'] = $data['takerOrderId'];
             }
             $trade = $this->parse_trade($data);
             $trade['info'] = $msg;
@@ -1770,11 +1764,11 @@ class kucoin extends Exchange {
     public function _websocket_process_first_order_book ($ob, $contextId, $symbol, $restRequestMs) {
         // $ob = $this->fetch_order_book($symbol);
         $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
-        if (is_array($symbolData) && array_key_exists(!'restRequestMs', $symbolData)) {
+        if (!(is_array($symbolData) && array_key_exists('restRequestMs', $symbolData))) {
             // not current request
             return;
         }
-        if ($symbolData['restRequestMs'] != $restRequestMs) {
+        if ($symbolData['restRequestMs'] !== $restRequestMs) {
             // not current request
             return;
         }
@@ -1804,7 +1798,7 @@ class kucoin extends Exchange {
         $data = $delta['data'];
         $sequenceStart = $this->safe_integer($data, 'sequenceStart');
         $nextSequence = $lastSequence . 1;
-        if ($checkLastSequence && ($nextSequence != $sequenceStart)) {
+        if ($checkLastSequence && ($nextSequence !== $sequenceStart)) {
             $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $nextSequence . ' !=' . (string) $sequenceStart . ')'), $contextId);
             return;
         }
@@ -1813,13 +1807,13 @@ class kucoin extends Exchange {
             // process it
             $changes = $this->safe_value($data, 'changes');
             $keys = is_array($changes) ? array_keys($changes) : array();
-            for ($k = 0; $k < count ($keys);$k++) {
+            for ($k = 0; $k < count ($keys); $k++) {
                 $isBid = ($keys[$k] === 'bids');
                 $bidsOrAsks = $this->safe_value($changes, $keys[$k]);
                 for ($a = 0; $a < count ($bidsOrAsks); $a++) {
                     $bidOrAsk = $bidsOrAsks[$a];
                     $price = floatval ($bidOrAsk[0]);
-                    $amount = floatval ($bidOrAsk[1])
+                    $amount = floatval ($bidOrAsk[1]);
                     $sequence = intval ($bidOrAsk[2]);
                     if ($lastSequence < $sequence) {
                         $this->updateBidAsk ([$price, $amount], $ob[$keys[$k]], $isBid);
@@ -1839,20 +1833,20 @@ class kucoin extends Exchange {
         $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
         if ($event === 'ob') {
             $payload = array (
-                "$id" => $nonce,                          
-                "type" => "subscribe",
-                "topic" => "/market/level2:" . $id,
-                "response" => true                              
+                'id' => $nonce,
+                'type' => 'subscribe',
+                'topic' => '/market/level2:' . $id,
+                'response' => true,
             );
             $symbolData['limit'] = $this->safe_integer($params, 'limit', null);
         } else if ($event === 'trade') {
             $payload = array (
-                "$id" => $nonce,                          
-                "type" => "subscribe",
-                //"topic" => "/market/match:" . $id,
-                "topic" => "/market/level3:" . $id,
-                "privateChannel" => false,                      
-                "response" => true                              
+                'id' => $nonce,
+                'type' => 'subscribe',
+                // 'topic' => '/market/match:' . $id,
+                'topic' => '/market/level3:' . $id,
+                'privateChannel' => false,
+                'response' => true,
             );
         }
         $this->_contextSetSymbolData ($contextId, $event, $symbol, $symbolData);
@@ -1867,19 +1861,19 @@ class kucoin extends Exchange {
         $payload = null;
         if ($event === 'ob') {
             $payload = array (
-                "$id" => $nonce,                          
-                "type" => "unsubscribe",
-                "topic" => "/market/level2:" . $id,
-                "response" => true                              
+                'id' => $nonce,
+                'type' => 'unsubscribe',
+                'topic' => '/market/level2:' . $id,
+                'response' => true,
             );
         } else if ($event === 'trade') {
             $payload = array (
-                "$id" => $nonce,                          
-                "type" => "unsubscribe",
-                //"topic" => "/market/match:" . $id,
-                "topic" => "/market/level3:" . $id,
-                "privateChannel" => false,                      
-                "response" => true                              
+                'id' => $nonce,
+                'type' => 'unsubscribe',
+                // 'topic' => '/market/match:' . $id,
+                'topic' => '/market/level3:' . $id,
+                'privateChannel' => false,
+                'response' => true,
             );
         }
         $this->websocketSendJson ($payload);

@@ -1586,7 +1586,7 @@ module.exports = class kucoin extends Exchange {
     }
 
     async _websocketOnInit (contextId, websocketConexConfig) {
-        const response = await this.publicPostBulletPublic();
+        const response = await this.publicPostBulletPublic ();
         const server = response['data']['instanceServers'][0];
         websocketConexConfig['baseurl'] = server['endpoint'];
         websocketConexConfig['url'] = server['endpoint'] + '?token=' + response['data']['token'] + '&acceptUserMessage=true';
@@ -1594,7 +1594,7 @@ module.exports = class kucoin extends Exchange {
             'pingInterval': server['pingInterval'],
             'pingTimeout': server['pingTimeout'],
             'token': response['data']['token'],
-        }
+        };
         return websocketConexConfig;
     }
 
@@ -1616,8 +1616,6 @@ module.exports = class kucoin extends Exchange {
     }
 
     _websocketRestartPingTimer (contextId, pingInterval, pingTimeout) {
-        console.log ("PingInterval:" + pingInterval);
-        console.log ("pingTimeout:" + pingTimeout);
         // reset ping timer
         let pingTimer = this._contextGet (contextId, 'pingTimer');
         if (typeof pingTimer !== 'undefined') {
@@ -1632,9 +1630,8 @@ module.exports = class kucoin extends Exchange {
         const pingSeqStr = pingSeq.toString ();
         const data = {
             'id': pingSeqStr,
-            'type': "ping",
+            'type': 'ping',
         };
-        console.log ("PING:" + pingSeq);
         this.websocketSendJson (data, contextId);
         let pongTimers = this._contextGet (contextId, 'pongtimers');
         if (typeof pongTimers === 'undefined') {
@@ -1655,15 +1652,14 @@ module.exports = class kucoin extends Exchange {
         const msgType = this.safeString (msg, 'type');
         if (msgType === 'message') {
             const subject = this.safeString (msg, 'subject');
-            //if (subject === 'trade.l3match') {
-            if (subject.indexOf ('trade.l3') === 0){
+            // if (subject === 'trade.l3match') {
+            if (subject.indexOf ('trade.l3') === 0) {
                 this._websocketHandleTrade (contextId, msg);
             } else if (subject === 'trade.l2update') {
                 this._websocketHandleOb (contextId, msg);
             }
         } else if (msgType === 'pong') {
             const pingSeq = this.safeInteger (msg, 'id');
-            console.log ("PONG:" + pingSeq);
             const pongTimers = this._contextGet (contextId, 'pongtimers');
             if (pingSeq in pongTimers) {
                 const timer = pongTimers[pingSeq];
@@ -1680,8 +1676,6 @@ module.exports = class kucoin extends Exchange {
             this.emit (nonceIdStr, true);
         } else if (msgType === 'welcome') {
             this.emit ('welcome', true);
-        } else {
-            console.log (data);
         }
     }
 
@@ -1702,9 +1696,9 @@ module.exports = class kucoin extends Exchange {
         if (subject === 'trade.l3match') {
             // trade
             if (data['side'] === 'sell') {
-                data['orderId'] = data['makerOrderId']; 
+                data['orderId'] = data['makerOrderId'];
             } else {
-                data['orderId'] = data['takerOrderId']; 
+                data['orderId'] = data['takerOrderId'];
             }
             const trade = this.parseTrade (data);
             trade['info'] = msg;
@@ -1727,7 +1721,7 @@ module.exports = class kucoin extends Exchange {
         this._contextSet (contextId, 'ob_sequence_id', seqIdEnd);
         const symbolId = this.safeString (msg['data'], 'symbol');
         const symbol = this.findSymbol (symbolId);
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         if ('ob' in symbolData) {
             // ob generated previously
             const data = msg['data'];
@@ -1759,7 +1753,7 @@ module.exports = class kucoin extends Exchange {
     }
 
     _websocketRequestFirstOrderBook (contextId, symbol) {
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         const restRequestMs = this.milliseconds ();
         symbolData['restRequestMs'] = restRequestMs;
         this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
@@ -1769,11 +1763,11 @@ module.exports = class kucoin extends Exchange {
     _websocketProcessFirstOrderBook (ob, contextId, symbol, restRequestMs) {
         // let ob = await this.fetchOrderBook (symbol);
         const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
-        if (!'restRequestMs' in symbolData) {
+        if (!('restRequestMs' in symbolData)) {
             // not current request
             return;
         }
-        if (symbolData['restRequestMs'] != restRequestMs) {
+        if (symbolData['restRequestMs'] !== restRequestMs) {
             // not current request
             return;
         }
@@ -1799,13 +1793,11 @@ module.exports = class kucoin extends Exchange {
         this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
     }
 
-
-
     _websocketProcessOrderBookDelta (contextId, ob, delta, lastSequence, checkLastSequence) {
         const data = delta['data'];
         const sequenceStart = this.safeInteger (data, 'sequenceStart');
         const nextSequence = lastSequence + 1;
-        if (checkLastSequence && (nextSequence != sequenceStart)) {
+        if (checkLastSequence && (nextSequence !== sequenceStart)) {
             this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + nextSequence.toString () + ' !=' + sequenceStart.toString () + ')'), contextId);
             return;
         }
@@ -1814,13 +1806,13 @@ module.exports = class kucoin extends Exchange {
             // process it
             const changes = this.safeValue (data, 'changes');
             const keys = Object.keys (changes);
-            for (let k = 0; k < keys.length;k++) {
+            for (let k = 0; k < keys.length; k++) {
                 const isBid = (keys[k] === 'bids');
                 const bidsOrAsks = this.safeValue (changes, keys[k]);
                 for (let a = 0; a < bidsOrAsks.length; a++) {
                     const bidOrAsk = bidsOrAsks[a];
                     const price = parseFloat (bidOrAsk[0]);
-                    const amount = parseFloat (bidOrAsk[1])
+                    const amount = parseFloat (bidOrAsk[1]);
                     const sequence = parseInt (bidOrAsk[2]);
                     if (lastSequence < sequence) {
                         this.updateBidAsk ([price, amount], ob[keys[k]], isBid);
@@ -1840,20 +1832,20 @@ module.exports = class kucoin extends Exchange {
         const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (event === 'ob') {
             payload = {
-                "id": nonce,                          
-                "type": "subscribe",
-                "topic": "/market/level2:" + id,
-                "response": true                              
+                'id': nonce,
+                'type': 'subscribe',
+                'topic': '/market/level2:' + id,
+                'response': true,
             };
             symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
         } else if (event === 'trade') {
             payload = {
-                "id": nonce,                          
-                "type": "subscribe",
-                //"topic": "/market/match:" + id,
-                "topic": "/market/level3:" + id,
-                "privateChannel": false,                      
-                "response": true                              
+                'id': nonce,
+                'type': 'subscribe',
+                // 'topic': '/market/match:' + id,
+                'topic': '/market/level3:' + id,
+                'privateChannel': false,
+                'response': true,
             };
         }
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
@@ -1868,19 +1860,19 @@ module.exports = class kucoin extends Exchange {
         let payload = undefined;
         if (event === 'ob') {
             payload = {
-                "id": nonce,                          
-                "type": "unsubscribe",
-                "topic": "/market/level2:" + id,
-                "response": true                              
+                'id': nonce,
+                'type': 'unsubscribe',
+                'topic': '/market/level2:' + id,
+                'response': true,
             };
         } else if (event === 'trade') {
             payload = {
-                "id": nonce,                          
-                "type": "unsubscribe",
-                //"topic": "/market/match:" + id,
-                "topic": "/market/level3:" + id,
-                "privateChannel": false,                      
-                "response": true                              
+                'id': nonce,
+                'type': 'unsubscribe',
+                // 'topic': '/market/match:' + id,
+                'topic': '/market/level3:' + id,
+                'privateChannel': false,
+                'response': true,
             };
         }
         this.websocketSendJson (payload);
