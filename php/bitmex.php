@@ -1582,6 +1582,10 @@ class bitmex extends Exchange {
         if ($event !== 'ob' && $event !== 'trade') {
             throw new NotSupported('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
         }
+        $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+        if (!(is_array($symbolData) && array_key_exists('sub-nonces', $symbolData))) {
+            $symbolData['sub-nonces'] = array();
+        }
         $id = strtoupper($this->market_id ($symbol));
         $payload = null;
         if ($event === 'ob') {
@@ -1589,17 +1593,13 @@ class bitmex extends Exchange {
                 'op' => 'subscribe',
                 'args' => ['orderBookL2:' . $id],
             );
+            $symbolData['limit'] = $this->safe_integer($params, 'limit', null);
         } else if ($event === 'trade') {
             $payload = array (
                 'op' => 'subscribe',
                 'args' => ['trade:' . $id],
             );
         }
-        $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
-        if (!(is_array($symbolData) && array_key_exists('sub-nonces', $symbolData))) {
-            $symbolData['sub-nonces'] = array();
-        }
-        $symbolData['limit'] = $this->safe_integer($params, 'limit', null);
         $nonceStr = (string) $nonce;
         $handle = $this->_setTimeout ($contextId, $this->timeout, $this->_websocketMethodMap ('_websocketTimeoutRemoveNonce'), [$contextId, $nonceStr, $event, $symbol, 'sub-nonce']);
         $symbolData['sub-nonces'][$nonceStr] = $handle;
@@ -1611,6 +1611,10 @@ class bitmex extends Exchange {
         if ($event !== 'ob' && $event !== 'trade') {
             throw new NotSupported('unsubscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
         }
+        $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+        if (!(is_array($symbolData) && array_key_exists('unsub-nonces', $symbolData))) {
+            $symbolData['unsub-nonces'] = array();
+        }
         $id = strtoupper($this->market_id ($symbol));
         $payload = null;
         if ($event === 'ob') {
@@ -1623,10 +1627,6 @@ class bitmex extends Exchange {
                 'op' => 'unsubscribe',
                 'args' => ['trade:' . $id],
             );
-        }
-        $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
-        if (!(is_array($symbolData) && array_key_exists('unsub-nonces', $symbolData))) {
-            $symbolData['unsub-nonces'] = array();
         }
         $nonceStr = (string) $nonce;
         $handle = $this->_setTimeout ($contextId, $this->timeout, $this->_websocketMethodMap ('_websocketTimeoutRemoveNonce'), [$contextId, $nonceStr, $event, $symbol, 'unsub-nonces']);

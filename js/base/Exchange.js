@@ -2457,6 +2457,18 @@ module.exports = class Exchange extends EventEmitter{
         return this.wsconf['methodmap'][key];
     }
 
+    _awaitMethod (contextId, method, params, callbackMethod, callbackParams, thisParam = null) {
+        thisParam = thisParam != null ? thisParam: this;
+        thisParam[method].apply (thisParam, params)
+        .catch ((e) => {
+            that.emit ('err', e, contextId);
+        })
+        .then (response => {
+            callbackParams.unshift (response);
+            thisParam[callbackMethod].apply (thisParam, callbackParams);
+        });
+    }
+
     _setTimeout (contextId, mseconds, method, params, thisParam = null) {
         thisParam = thisParam != null ? thisParam: this;
         let that = this;

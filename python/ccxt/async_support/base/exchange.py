@@ -1053,6 +1053,19 @@ class Exchange(BaseExchange, EventEmitter):
             raise ExchangeError(self.id + ': ' + key + ' not found in websocket methodmap')
         return self.wsconf['methodmap'][key]
 
+    def _awaitMethod (self, contextId, method, params, callbackMethod, callbackParams, this_param = None):
+        this_param = this_param if (this_param is not None) else self
+        try:
+            response = await getattr(this_param, method)(*params)
+            try:
+                callbackParams.insert(0,response)
+                getattr(this_param, callbackMethod)(*callbackParams)
+            except Exception as ex2:
+                self.emit('err', ExchangeError(self.id + ': error invoking method ' + callbackMethod + ' ' + str(ex2)), contextId)
+        except Exception as ex:
+            self.emit('err', ExchangeError(self.id + ': error invoking method ' + method + ' ' + str(ex)), contextId)
+    }
+
     def _setTimeout(self, contextId, mseconds, method, params, this_param=None):
         this_param = this_param if (this_param is not None) else self
 

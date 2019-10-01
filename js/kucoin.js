@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 const Exchange = require ('./base/Exchange');
-const { ExchangeError, ArgumentsRequired, ExchangeNotAvailable, InsufficientFunds, OrderNotFound, InvalidOrder, AccountSuspended, InvalidNonce, DDoSProtection, NotSupported, BadRequest, AuthenticationError } = require ('./base/errors');
+const { ExchangeError, ArgumentsRequired, ExchangeNotAvailable, InsufficientFunds, OrderNotFound, InvalidOrder, AccountSuspended, InvalidNonce, DDoSProtection, NotSupported, BadRequest, AuthenticationError, NetworkError } = require ('./base/errors');
 
 //  ---------------------------------------------------------------------------
 
@@ -178,6 +178,38 @@ module.exports = class kucoin extends Exchange {
                 'version': 'v1',
                 'symbolSeparator': '-',
                 'fetchMyTradesMethod': 'private_get_fills',
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://push1-v2.kucoin.com/endpoint',
+                        'wait4readyEvent': 'welcome',
+                    },
+                },
+                'methodmap': {
+                    '_websocketTimeoutSendPing': '_websocketTimeoutSendPing',
+                    '_websocketTimeoutPong': '_websocketTimeoutPong',
+                    'fetchOrderBook': 'fetchOrderBook',
+                    '_websocketProcessFirstOrderBook': '_websocketProcessFirstOrderBook',
+                    '_websocketRequestFirstOrderBook': '_websocketRequestFirstOrderBook',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
             },
         });
     }
@@ -1551,5 +1583,306 @@ module.exports = class kucoin extends Exchange {
         if (ExceptionClass !== undefined) {
             throw new ExceptionClass (this.id + ' ' + message);
         }
+    }
+
+    async _websocketOnInit (contextId, websocketConexConfig) {
+        const response = await this.publicPostBulletPublic();
+        const server = response['data']['instanceServers'][0];
+        websocketConexConfig['baseurl'] = server['endpoint'];
+        websocketConexConfig['url'] = server['endpoint'] + '?token=' + response['data']['token'] + '&acceptUserMessage=true';
+        websocketConexConfig['session'] = {
+            'pingInterval': server['pingInterval'],
+            'pingTimeout': server['pingTimeout'],
+            'token': response['data']['token'],
+        }
+        return websocketConexConfig;
+    }
+
+    _websocketOnOpen (contextId, websocketOptions) { // eslint-disable-line no-unused-vars
+        const pingInterval = websocketOptions['session']['pingInterval'];
+        const pingTimeout = websocketOptions['session']['pingTimeout'];
+        this._contextSet (contextId, 'pingInterval', pingInterval);
+        this._contextSet (contextId, 'pingTimeout', pingTimeout);
+        this._websocketRestartPingTimer (contextId, pingInterval, pingTimeout);
+    }
+
+    _websocketOnClose (contextId) {
+        let pingTimer = this._contextGet (contextId, 'pingTimer');
+        if (typeof pingTimer !== 'undefined') {
+            this._cancelTimeout (pingTimer);
+        }
+        pingTimer = undefined;
+        this._contextSet (contextId, 'timer', pingTimer);
+    }
+
+    _websocketRestartPingTimer (contextId, pingInterval, pingTimeout) {
+        console.log ("PingInterval:" + pingInterval);
+        console.log ("pingTimeout:" + pingTimeout);
+        // reset ping timer
+        let pingTimer = this._contextGet (contextId, 'pingTimer');
+        if (typeof pingTimer !== 'undefined') {
+            this._cancelTimeout (pingTimer);
+        }
+        pingTimer = this._setTimeout (contextId, pingInterval, this._websocketMethodMap ('_websocketTimeoutSendPing'), [contextId, pingTimeout]);
+        this._contextSet (contextId, 'pingTimer', pingTimer);
+    }
+
+    _websocketTimeoutSendPing (contextId, pingTimeout) {
+        const pingSeq = this.nonce ();
+        const pingSeqStr = pingSeq.toString ();
+        const data = {
+            'id': pingSeqStr,
+            'type': "ping",
+        };
+        console.log ("PING:" + pingSeq);
+        this.websocketSendJson (data, contextId);
+        let pongTimers = this._contextGet (contextId, 'pongtimers');
+        if (typeof pongTimers === 'undefined') {
+            pongTimers = [];
+        }
+        const newPongTimer = this._setTimeout (contextId, pingTimeout, this._websocketMethodMap ('_websocketTimeoutPong'), [contextId, pingSeq]);
+        pongTimers[pingSeqStr] = newPongTimer;
+        this._contextSet (contextId, 'pongtimers', pongTimers);
+    }
+
+    _websocketTimeoutPong (contextId, sequence) {
+        this.emit ('err', new ExchangeError (this.id + ' no pong received for ' + sequence), contextId);
+    }
+
+    _websocketOnMessage (contextId, data) {
+        // console.log (data);
+        const msg = JSON.parse (data);
+        const msgType = this.safeString (msg, 'type');
+        if (msgType === 'message') {
+            const subject = this.safeString (msg, 'subject');
+            //if (subject === 'trade.l3match') {
+            if (subject.indexOf ('trade.l3') === 0){
+                this._websocketHandleTrade (contextId, msg);
+            } else if (subject === 'trade.l2update') {
+                this._websocketHandleOb (contextId, msg);
+            }
+        } else if (msgType === 'pong') {
+            const pingSeq = this.safeInteger (msg, 'id');
+            console.log ("PONG:" + pingSeq);
+            const pongTimers = this._contextGet (contextId, 'pongtimers');
+            if (pingSeq in pongTimers) {
+                const timer = pongTimers[pingSeq];
+                this._cancelTimeout (timer);
+                this.omit (pongTimers, pingSeq);
+                this._contextSet (contextId, 'pongtimers', pongTimers);
+            }
+            const pingInterval = this._contextGet (contextId, 'pingInterval');
+            const pingTimeout = this._contextGet (contextId, 'pingTimeout');
+            this._websocketRestartPingTimer (contextId, pingInterval, pingTimeout);
+        } else if (msgType === 'ack') {
+            const nonceId = this.safeInteger (msg, 'id');
+            const nonceIdStr = nonceId.toString ();
+            this.emit (nonceIdStr, true);
+        } else if (msgType === 'welcome') {
+            this.emit ('welcome', true);
+        } else {
+            console.log (data);
+        }
+    }
+
+    _websocketHandleTrade (contextId, msg) {
+        // check sequence
+        const subject = this.safeString (msg, 'subject');
+        const data = this.safeValue (msg, 'data');
+        let lastSeqId = this._contextGet (contextId, 'trade_sequence_id');
+        const seqId = this.safeInteger (msg['data'], 'sequence');
+        if (typeof lastSeqId !== 'undefined') {
+            lastSeqId = lastSeqId + 1;
+            if (lastSeqId !== seqId) {
+                this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + lastSeqId.toString () + '+1 !=' + seqId.toString () + ')'), contextId);
+                return;
+            }
+        }
+        this._contextSet (contextId, 'trade_sequence_id', seqId);
+        if (subject === 'trade.l3match') {
+            // trade
+            if (data['side'] === 'sell') {
+                data['orderId'] = data['makerOrderId']; 
+            } else {
+                data['orderId'] = data['takerOrderId']; 
+            }
+            const trade = this.parseTrade (data);
+            trade['info'] = msg;
+            trade['type'] = undefined;
+            this.emit ('trade', trade['symbol'], trade);
+        }
+    }
+
+    _websocketHandleOb (contextId, msg) {
+        let lastSeqId = this._contextGet (contextId, 'ob_sequence_id');
+        const seqIdStart = this.safeInteger (msg['data'], 'sequenceStart');
+        const seqIdEnd = this.safeInteger (msg['data'], 'sequenceEnd');
+        if (typeof lastSeqId !== 'undefined') {
+            lastSeqId = lastSeqId + 1;
+            if (lastSeqId !== seqIdStart) {
+                this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + lastSeqId.toString () + ' !=' + seqIdStart.toString () + ')'), contextId);
+                return;
+            }
+        }
+        this._contextSet (contextId, 'ob_sequence_id', seqIdEnd);
+        const symbolId = this.safeString (msg['data'], 'symbol');
+        const symbol = this.findSymbol (symbolId);
+        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if ('ob' in symbolData) {
+            // ob generated previously
+            const data = msg['data'];
+            let obSequence = symbolData['lastSequence'];
+            let ob = symbolData['ob'];
+            ob = this._websocketProcessOrderBookDelta (contextId, ob, msg, obSequence, true);
+            obSequence = this.safeInteger (data, 'sequenceEnd');
+            symbolData['lastSequence'] = obSequence;
+            symbolData['ob'] = ob;
+            this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit']));
+            this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+        } else {
+            let deltas = [];
+            if ('deltas' in symbolData) {
+                deltas = symbolData['deltas'];
+            }
+            if ((deltas.length === 0) || (deltas.length > 100)) {
+                deltas = [];
+                deltas.push (msg);
+                symbolData['deltas'] = deltas;
+                this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+                this._websocketRequestFirstOrderBook (contextId, symbol);
+            } else {
+                deltas.push (msg);
+                symbolData['deltas'] = deltas;
+                this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+            }
+        }
+    }
+
+    _websocketRequestFirstOrderBook (contextId, symbol) {
+        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        const restRequestMs = this.milliseconds ();
+        symbolData['restRequestMs'] = restRequestMs;
+        this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+        this._awaitMethod (contextId, this._websocketMethodMap ('fetchOrderBook'), [symbol], this._websocketMethodMap ('_websocketProcessFirstOrderBook'), [contextId, symbol, restRequestMs]);
+    }
+
+    _websocketProcessFirstOrderBook (ob, contextId, symbol, restRequestMs) {
+        // let ob = await this.fetchOrderBook (symbol);
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if (!'restRequestMs' in symbolData) {
+            // not current request
+            return;
+        }
+        if (symbolData['restRequestMs'] != restRequestMs) {
+            // not current request
+            return;
+        }
+        const deltas = symbolData['deltas'];
+        // process orderbook deltas
+        const currentObSequence = ob['timestamp'];
+        let obSequence = currentObSequence;
+        let checkLastSequence = false;
+        for (let i = 0; i < deltas.length; i++) {
+            const delta = deltas[i];
+            ob = this._websocketProcessOrderBookDelta (contextId, ob, delta, obSequence, checkLastSequence);
+            const data = delta['data'];
+            const sequenceEnd = this.safeInteger (data, 'sequenceEnd');
+            if (sequenceEnd > obSequence) {
+                checkLastSequence = true;
+                obSequence = sequenceEnd;
+            }
+        }
+        symbolData['deltas'] = undefined;
+        symbolData['lastSequence'] = obSequence;
+        symbolData['ob'] = ob;
+        this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit']));
+        this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+    }
+
+
+
+    _websocketProcessOrderBookDelta (contextId, ob, delta, lastSequence, checkLastSequence) {
+        const data = delta['data'];
+        const sequenceStart = this.safeInteger (data, 'sequenceStart');
+        const nextSequence = lastSequence + 1;
+        if (checkLastSequence && (nextSequence != sequenceStart)) {
+            this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + nextSequence.toString () + ' !=' + sequenceStart.toString () + ')'), contextId);
+            return;
+        }
+        const sequenceEnd = this.safeInteger (data, 'sequenceEnd');
+        if (lastSequence < sequenceEnd) {
+            // process it
+            const changes = this.safeValue (data, 'changes');
+            const keys = Object.keys (changes);
+            for (let k = 0; k < keys.length;k++) {
+                const isBid = (keys[k] === 'bids');
+                const bidsOrAsks = this.safeValue (changes, keys[k]);
+                for (let a = 0; a < bidsOrAsks.length; a++) {
+                    const bidOrAsk = bidsOrAsks[a];
+                    const price = parseFloat (bidOrAsk[0]);
+                    const amount = parseFloat (bidOrAsk[1])
+                    const sequence = parseInt (bidOrAsk[2]);
+                    if (lastSequence < sequence) {
+                        this.updateBidAsk ([price, amount], ob[keys[k]], isBid);
+                    }
+                }
+            }
+        }
+        return ob;
+    }
+
+    _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob' && event !== 'trade') {
+            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        const id = this.market_id (symbol).toUpperCase ();
+        let payload = undefined;
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        if (event === 'ob') {
+            payload = {
+                "id": nonce,                          
+                "type": "subscribe",
+                "topic": "/market/level2:" + id,
+                "response": true                              
+            };
+            symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
+        } else if (event === 'trade') {
+            payload = {
+                "id": nonce,                          
+                "type": "subscribe",
+                //"topic": "/market/match:" + id,
+                "topic": "/market/level3:" + id,
+                "privateChannel": false,                      
+                "response": true                              
+            };
+        }
+        this._contextSetSymbolData (contextId, event, symbol, symbolData);
+        this.websocketSendJson (payload);
+    }
+
+    _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob' && event !== 'trade') {
+            throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        const id = this.market_id (symbol).toUpperCase ();
+        let payload = undefined;
+        if (event === 'ob') {
+            payload = {
+                "id": nonce,                          
+                "type": "unsubscribe",
+                "topic": "/market/level2:" + id,
+                "response": true                              
+            };
+        } else if (event === 'trade') {
+            payload = {
+                "id": nonce,                          
+                "type": "unsubscribe",
+                //"topic": "/market/match:" + id,
+                "topic": "/market/level3:" + id,
+                "privateChannel": false,                      
+                "response": true                              
+            };
+        }
+        this.websocketSendJson (payload);
     }
 };

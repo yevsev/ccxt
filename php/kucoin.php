@@ -180,6 +180,38 @@ class kucoin extends Exchange {
                 'symbolSeparator' => '-',
                 'fetchMyTradesMethod' => 'private_get_fills',
             ),
+            'wsconf' => array (
+                'conx-tpls' => array (
+                    'default' => array (
+                        'type' => 'ws',
+                        'baseurl' => 'wss://push1-v2.kucoin.com/endpoint',
+                        'wait4readyEvent' => 'welcome',
+                    ),
+                ),
+                'methodmap' => array (
+                    '_websocketTimeoutSendPing' => '_websocketTimeoutSendPing',
+                    '_websocketTimeoutPong' => '_websocketTimeoutPong',
+                    'fetchOrderBook' => 'fetchOrderBook',
+                    '_websocketProcessFirstOrderBook' => '_websocketProcessFirstOrderBook',
+                    '_websocketRequestFirstOrderBook' => '_websocketRequestFirstOrderBook',
+                ),
+                'events' => array (
+                    'ob' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                    'trade' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
+                ),
+            ),
         ));
     }
 
@@ -1552,5 +1584,304 @@ class kucoin extends Exchange {
         if ($ExceptionClass !== null) {
             throw new $ExceptionClass($this->id . ' ' . $message);
         }
+    }
+
+    public function _websocket_on_init ($contextId, $websocketConexConfig) {
+        $response = $this->publicPostBulletPublic();
+        $server = $response['data']['instanceServers'][0];
+        $websocketConexConfig['baseurl'] = $server['endpoint'];
+        $websocketConexConfig['url'] = $server['endpoint'] . '?token=' . $response['data']['token'] . '&acceptUserMessage=true';
+        $websocketConexConfig['session'] = {
+            'pingInterval' => $server['pingInterval'],
+            'pingTimeout' => $server['pingTimeout'],
+            'token' => $response['data']['token'],
+        }
+        return $websocketConexConfig;
+    }
+
+    public function _websocket_on_open ($contextId, $websocketOptions) {
+        $pingInterval = $websocketOptions['session']['pingInterval'];
+        $pingTimeout = $websocketOptions['session']['pingTimeout'];
+        $this->_contextSet ($contextId, 'pingInterval', $pingInterval);
+        $this->_contextSet ($contextId, 'pingTimeout', $pingTimeout);
+        $this->_websocket_restart_ping_timer ($contextId, $pingInterval, $pingTimeout);
+    }
+
+    public function _websocket_on_close ($contextId) {
+        $pingTimer = $this->_contextGet ($contextId, 'pingTimer');
+        if ($pingTimer !== null) {
+            $this->_cancelTimeout ($pingTimer);
+        }
+        $pingTimer = null;
+        $this->_contextSet ($contextId, 'timer', $pingTimer);
+    }
+
+    public function _websocket_restart_ping_timer ($contextId, $pingInterval, $pingTimeout) {
+        var_dump ("PingInterval:" . $pingInterval);
+        var_dump ("$pingTimeout:" . $pingTimeout);
+        // reset ping timer
+        $pingTimer = $this->_contextGet ($contextId, 'pingTimer');
+        if ($pingTimer !== null) {
+            $this->_cancelTimeout ($pingTimer);
+        }
+        $pingTimer = $this->_setTimeout ($contextId, $pingInterval, $this->_websocketMethodMap ('_websocketTimeoutSendPing'), [$contextId, $pingTimeout]);
+        $this->_contextSet ($contextId, 'pingTimer', $pingTimer);
+    }
+
+    public function _websocket_timeout_send_ping ($contextId, $pingTimeout) {
+        $pingSeq = $this->nonce ();
+        $pingSeqStr = (string) $pingSeq;
+        $data = array (
+            'id' => $pingSeqStr,
+            'type' => "ping",
+        );
+        var_dump ("PING:" . $pingSeq);
+        $this->websocketSendJson ($data, $contextId);
+        $pongTimers = $this->_contextGet ($contextId, 'pongtimers');
+        if ($pongTimers === null) {
+            $pongTimers = array();
+        }
+        $newPongTimer = $this->_setTimeout ($contextId, $pingTimeout, $this->_websocketMethodMap ('_websocketTimeoutPong'), [$contextId, $pingSeq]);
+        $pongTimers[$pingSeqStr] = $newPongTimer;
+        $this->_contextSet ($contextId, 'pongtimers', $pongTimers);
+    }
+
+    public function _websocket_timeout_pong ($contextId, $sequence) {
+        $this->emit ('err', new ExchangeError ($this->id . ' no pong received for ' . $sequence), $contextId);
+    }
+
+    public function _websocket_on_message ($contextId, $data) {
+        // var_dump ($data);
+        $msg = json_decode($data, $as_associative_array = true);
+        $msgType = $this->safe_string($msg, 'type');
+        if ($msgType === 'message') {
+            $subject = $this->safe_string($msg, 'subject');
+            //if ($subject === 'trade.l3match') {
+            if (mb_strpos($subject, 'trade.l3') === 0){
+                $this->_websocket_handle_trade ($contextId, $msg);
+            } else if ($subject === 'trade.l2update') {
+                $this->_websocket_handle_ob ($contextId, $msg);
+            }
+        } else if ($msgType === 'pong') {
+            $pingSeq = $this->safe_integer($msg, 'id');
+            var_dump ("PONG:" . $pingSeq);
+            $pongTimers = $this->_contextGet ($contextId, 'pongtimers');
+            if (is_array($pongTimers) && array_key_exists($pingSeq, $pongTimers)) {
+                $timer = $pongTimers[$pingSeq];
+                $this->_cancelTimeout ($timer);
+                $this->omit ($pongTimers, $pingSeq);
+                $this->_contextSet ($contextId, 'pongtimers', $pongTimers);
+            }
+            $pingInterval = $this->_contextGet ($contextId, 'pingInterval');
+            $pingTimeout = $this->_contextGet ($contextId, 'pingTimeout');
+            $this->_websocket_restart_ping_timer ($contextId, $pingInterval, $pingTimeout);
+        } else if ($msgType === 'ack') {
+            $nonceId = $this->safe_integer($msg, 'id');
+            $nonceIdStr = (string) $nonceId;
+            $this->emit ($nonceIdStr, true);
+        } else if ($msgType === 'welcome') {
+            $this->emit ('welcome', true);
+        } else {
+            var_dump ($data);
+        }
+    }
+
+    public function _websocket_handle_trade ($contextId, $msg) {
+        // check sequence
+        $subject = $this->safe_string($msg, 'subject');
+        $data = $this->safe_value($msg, 'data');
+        $lastSeqId = $this->_contextGet ($contextId, 'trade_sequence_id');
+        $seqId = $this->safe_integer($msg['data'], 'sequence');
+        if ($lastSeqId !== null) {
+            $lastSeqId = $lastSeqId . 1;
+            if ($lastSeqId !== $seqId) {
+                $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $lastSeqId . '+1 !=' . (string) $seqId . ')'), $contextId);
+                return;
+            }
+        }
+        $this->_contextSet ($contextId, 'trade_sequence_id', $seqId);
+        if ($subject === 'trade.l3match') {
+            // $trade
+            if ($data['side'] === 'sell') {
+                $data['orderId'] = $data['makerOrderId']; 
+            } else {
+                $data['orderId'] = $data['takerOrderId']; 
+            }
+            $trade = $this->parse_trade($data);
+            $trade['info'] = $msg;
+            $trade['type'] = null;
+            $this->emit ('trade', $trade['symbol'], $trade);
+        }
+    }
+
+    public function _websocket_handle_ob ($contextId, $msg) {
+        $lastSeqId = $this->_contextGet ($contextId, 'ob_sequence_id');
+        $seqIdStart = $this->safe_integer($msg['data'], 'sequenceStart');
+        $seqIdEnd = $this->safe_integer($msg['data'], 'sequenceEnd');
+        if ($lastSeqId !== null) {
+            $lastSeqId = $lastSeqId . 1;
+            if ($lastSeqId !== $seqIdStart) {
+                $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $lastSeqId . ' !=' . (string) $seqIdStart . ')'), $contextId);
+                return;
+            }
+        }
+        $this->_contextSet ($contextId, 'ob_sequence_id', $seqIdEnd);
+        $symbolId = $this->safe_string($msg['data'], 'symbol');
+        $symbol = $this->find_symbol($symbolId);
+        $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if (is_array($symbolData) && array_key_exists('ob', $symbolData)) {
+            // $ob generated previously
+            $data = $msg['data'];
+            $obSequence = $symbolData['lastSequence'];
+            $ob = $symbolData['ob'];
+            $ob = $this->_websocket_process_order_book_delta ($contextId, $ob, $msg, $obSequence, true);
+            $obSequence = $this->safe_integer($data, 'sequenceEnd');
+            $symbolData['lastSequence'] = $obSequence;
+            $symbolData['ob'] = $ob;
+            $this->emit ('ob', $symbol, $this->_cloneOrderBook ($symbolData['ob'], $symbolData['limit']));
+            $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+        } else {
+            $deltas = array();
+            if (is_array($symbolData) && array_key_exists('deltas', $symbolData)) {
+                $deltas = $symbolData['deltas'];
+            }
+            if ((strlen ($deltas) === 0) || (strlen ($deltas) > 100)) {
+                $deltas = array();
+                $deltas[] = $msg;
+                $symbolData['deltas'] = $deltas;
+                $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+                $this->_websocket_request_first_order_book ($contextId, $symbol);
+            } else {
+                $deltas[] = $msg;
+                $symbolData['deltas'] = $deltas;
+                $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+            }
+        }
+    }
+
+    public function _websocket_request_first_order_book ($contextId, $symbol) {
+        $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        $restRequestMs = $this->milliseconds ();
+        $symbolData['restRequestMs'] = $restRequestMs;
+        $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+        $this->_awaitMethod ($contextId, $this->_websocketMethodMap ('fetchOrderBook'), [$symbol], $this->_websocketMethodMap ('_websocketProcessFirstOrderBook'), [$contextId, $symbol, $restRequestMs]);
+    }
+
+    public function _websocket_process_first_order_book ($ob, $contextId, $symbol, $restRequestMs) {
+        // $ob = $this->fetch_order_book($symbol);
+        $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if (is_array($symbolData) && array_key_exists(!'restRequestMs', $symbolData)) {
+            // not current request
+            return;
+        }
+        if ($symbolData['restRequestMs'] != $restRequestMs) {
+            // not current request
+            return;
+        }
+        $deltas = $symbolData['deltas'];
+        // process orderbook $deltas
+        $currentObSequence = $ob['timestamp'];
+        $obSequence = $currentObSequence;
+        $checkLastSequence = false;
+        for ($i = 0; $i < count ($deltas); $i++) {
+            $delta = $deltas[$i];
+            $ob = $this->_websocket_process_order_book_delta ($contextId, $ob, $delta, $obSequence, $checkLastSequence);
+            $data = $delta['data'];
+            $sequenceEnd = $this->safe_integer($data, 'sequenceEnd');
+            if ($sequenceEnd > $obSequence) {
+                $checkLastSequence = true;
+                $obSequence = $sequenceEnd;
+            }
+        }
+        $symbolData['deltas'] = null;
+        $symbolData['lastSequence'] = $obSequence;
+        $symbolData['ob'] = $ob;
+        $this->emit ('ob', $symbol, $this->_cloneOrderBook ($symbolData['ob'], $symbolData['limit']));
+        $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
+    }
+
+    public function _websocket_process_order_book_delta ($contextId, $ob, $delta, $lastSequence, $checkLastSequence) {
+        $data = $delta['data'];
+        $sequenceStart = $this->safe_integer($data, 'sequenceStart');
+        $nextSequence = $lastSequence . 1;
+        if ($checkLastSequence && ($nextSequence != $sequenceStart)) {
+            $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $nextSequence . ' !=' . (string) $sequenceStart . ')'), $contextId);
+            return;
+        }
+        $sequenceEnd = $this->safe_integer($data, 'sequenceEnd');
+        if ($lastSequence < $sequenceEnd) {
+            // process it
+            $changes = $this->safe_value($data, 'changes');
+            $keys = is_array($changes) ? array_keys($changes) : array();
+            for ($k = 0; $k < count ($keys);$k++) {
+                $isBid = ($keys[$k] === 'bids');
+                $bidsOrAsks = $this->safe_value($changes, $keys[$k]);
+                for ($a = 0; $a < count ($bidsOrAsks); $a++) {
+                    $bidOrAsk = $bidsOrAsks[$a];
+                    $price = floatval ($bidOrAsk[0]);
+                    $amount = floatval ($bidOrAsk[1])
+                    $sequence = intval ($bidOrAsk[2]);
+                    if ($lastSequence < $sequence) {
+                        $this->updateBidAsk ([$price, $amount], $ob[$keys[$k]], $isBid);
+                    }
+                }
+            }
+        }
+        return $ob;
+    }
+
+    public function _websocket_subscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob' && $event !== 'trade') {
+            throw new NotSupported('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        $id = strtoupper($this->market_id ($symbol));
+        $payload = null;
+        $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
+        if ($event === 'ob') {
+            $payload = array (
+                "$id" => $nonce,                          
+                "type" => "subscribe",
+                "topic" => "/market/level2:" . $id,
+                "response" => true                              
+            );
+            $symbolData['limit'] = $this->safe_integer($params, 'limit', null);
+        } else if ($event === 'trade') {
+            $payload = array (
+                "$id" => $nonce,                          
+                "type" => "subscribe",
+                //"topic" => "/market/match:" . $id,
+                "topic" => "/market/level3:" . $id,
+                "privateChannel" => false,                      
+                "response" => true                              
+            );
+        }
+        $this->_contextSetSymbolData ($contextId, $event, $symbol, $symbolData);
+        $this->websocketSendJson ($payload);
+    }
+
+    public function _websocket_unsubscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
+        if ($event !== 'ob' && $event !== 'trade') {
+            throw new NotSupported('unsubscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+        }
+        $id = strtoupper($this->market_id ($symbol));
+        $payload = null;
+        if ($event === 'ob') {
+            $payload = array (
+                "$id" => $nonce,                          
+                "type" => "unsubscribe",
+                "topic" => "/market/level2:" . $id,
+                "response" => true                              
+            );
+        } else if ($event === 'trade') {
+            $payload = array (
+                "$id" => $nonce,                          
+                "type" => "unsubscribe",
+                //"topic" => "/market/match:" . $id,
+                "topic" => "/market/level3:" . $id,
+                "privateChannel" => false,                      
+                "response" => true                              
+            );
+        }
+        $this->websocketSendJson ($payload);
     }
 }

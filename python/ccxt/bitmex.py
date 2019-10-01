@@ -1444,6 +1444,9 @@ class bitmex (Exchange):
     def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
         if event != 'ob' and event != 'trade':
             raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if not('sub-nonces' in list(symbolData.keys())):
+            symbolData['sub-nonces'] = {}
         id = self.market_id(symbol).upper()
         payload = None
         if event == 'ob':
@@ -1451,15 +1454,12 @@ class bitmex (Exchange):
                 'op': 'subscribe',
                 'args': ['orderBookL2:' + id],
             }
+            symbolData['limit'] = self.safe_integer(params, 'limit', None)
         elif event == 'trade':
             payload = {
                 'op': 'subscribe',
                 'args': ['trade:' + id],
             }
-        symbolData = self._contextGetSymbolData(contextId, event, symbol)
-        if not('sub-nonces' in list(symbolData.keys())):
-            symbolData['sub-nonces'] = {}
-        symbolData['limit'] = self.safe_integer(params, 'limit', None)
         nonceStr = str(nonce)
         handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce'])
         symbolData['sub-nonces'][nonceStr] = handle
@@ -1469,6 +1469,9 @@ class bitmex (Exchange):
     def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
         if event != 'ob' and event != 'trade':
             raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if not('unsub-nonces' in list(symbolData.keys())):
+            symbolData['unsub-nonces'] = {}
         id = self.market_id(symbol).upper()
         payload = None
         if event == 'ob':
@@ -1481,9 +1484,6 @@ class bitmex (Exchange):
                 'op': 'unsubscribe',
                 'args': ['trade:' + id],
             }
-        symbolData = self._contextGetSymbolData(contextId, event, symbol)
-        if not('unsub-nonces' in list(symbolData.keys())):
-            symbolData['unsub-nonces'] = {}
         nonceStr = str(nonce)
         handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces'])
         symbolData['unsub-nonces'][nonceStr] = handle

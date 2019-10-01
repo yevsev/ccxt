@@ -1582,6 +1582,10 @@ module.exports = class bitmex extends Exchange {
         if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        if (!('sub-nonces' in symbolData)) {
+            symbolData['sub-nonces'] = {};
+        }
         const id = this.market_id (symbol).toUpperCase ();
         let payload = undefined;
         if (event === 'ob') {
@@ -1589,17 +1593,13 @@ module.exports = class bitmex extends Exchange {
                 'op': 'subscribe',
                 'args': ['orderBookL2:' + id],
             };
+            symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
         } else if (event === 'trade') {
             payload = {
                 'op': 'subscribe',
                 'args': ['trade:' + id],
             };
         }
-        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
-        if (!('sub-nonces' in symbolData)) {
-            symbolData['sub-nonces'] = {};
-        }
-        symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
         const nonceStr = nonce.toString ();
         const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
         symbolData['sub-nonces'][nonceStr] = handle;
@@ -1611,6 +1611,10 @@ module.exports = class bitmex extends Exchange {
         if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
+        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        if (!('unsub-nonces' in symbolData)) {
+            symbolData['unsub-nonces'] = {};
+        }
         const id = this.market_id (symbol).toUpperCase ();
         let payload = undefined;
         if (event === 'ob') {
@@ -1623,10 +1627,6 @@ module.exports = class bitmex extends Exchange {
                 'op': 'unsubscribe',
                 'args': ['trade:' + id],
             };
-        }
-        const symbolData = this._contextGetSymbolData (contextId, event, symbol);
-        if (!('unsub-nonces' in symbolData)) {
-            symbolData['unsub-nonces'] = {};
         }
         const nonceStr = nonce.toString ();
         const handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);

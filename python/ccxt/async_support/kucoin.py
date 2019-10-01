@@ -6,6 +6,7 @@
 from ccxt.async_support.base.exchange import Exchange
 import hashlib
 import math
+import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import AccountSuspended
@@ -15,6 +16,7 @@ from ccxt.base.errors import InsufficientFunds
 from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import OrderNotFound
 from ccxt.base.errors import NotSupported
+from ccxt.base.errors import NetworkError
 from ccxt.base.errors import DDoSProtection
 from ccxt.base.errors import ExchangeNotAvailable
 from ccxt.base.errors import InvalidNonce
@@ -192,6 +194,38 @@ class kucoin (Exchange):
                 'version': 'v1',
                 'symbolSeparator': '-',
                 'fetchMyTradesMethod': 'private_get_fills',
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://push1-v2.kucoin.com/endpoint',
+                        'wait4readyEvent': 'welcome',
+                    },
+                },
+                'methodmap': {
+                    '_websocketTimeoutSendPing': '_websocketTimeoutSendPing',
+                    '_websocketTimeoutPong': '_websocketTimeoutPong',
+                    'fetchOrderBook': 'fetchOrderBook',
+                    '_websocketProcessFirstOrderBook': '_websocketProcessFirstOrderBook',
+                    '_websocketRequestFirstOrderBook': '_websocketRequestFirstOrderBook',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
             },
         })
 
@@ -1449,3 +1483,259 @@ class kucoin (Exchange):
         ExceptionClass = self.safe_value_2(self.exceptions, message, errorCode)
         if ExceptionClass is not None:
             raise ExceptionClass(self.id + ' ' + message)
+
+    async def _websocket_on_init(self, contextId, websocketConexConfig):
+        response = await self.publicPostBulletPublic()
+        server = response['data']['instanceServers'][0]
+        websocketConexConfig['baseurl'] = server['endpoint']
+        websocketConexConfig['url'] = server['endpoint'] + '?token=' + response['data']['token'] + '&acceptUserMessage=true'
+        websocketConexConfig['session'] = {
+            'pingInterval': server['pingInterval'],
+            'pingTimeout': server['pingTimeout'],
+            'token': response['data']['token'],
+        return websocketConexConfig
+
+    def _websocket_on_open(self, contextId, websocketOptions):
+        pingInterval = websocketOptions['session']['pingInterval']
+        pingTimeout = websocketOptions['session']['pingTimeout']
+        self._contextSet(contextId, 'pingInterval', pingInterval)
+        self._contextSet(contextId, 'pingTimeout', pingTimeout)
+        self._websocket_restart_ping_timer(contextId, pingInterval, pingTimeout)
+
+    def _websocket_on_close(self, contextId):
+        pingTimer = self._contextGet(contextId, 'pingTimer')
+        if pingTimer is not None:
+            self._cancelTimeout(pingTimer)
+        pingTimer = None
+        self._contextSet(contextId, 'timer', pingTimer)
+
+    def _websocket_restart_ping_timer(self, contextId, pingInterval, pingTimeout):
+        print("PingInterval:" + pingInterval)
+        print("pingTimeout:" + pingTimeout)
+        # reset ping timer
+        pingTimer = self._contextGet(contextId, 'pingTimer')
+        if pingTimer is not None:
+            self._cancelTimeout(pingTimer)
+        pingTimer = self._setTimeout(contextId, pingInterval, self._websocketMethodMap('_websocketTimeoutSendPing'), [contextId, pingTimeout])
+        self._contextSet(contextId, 'pingTimer', pingTimer)
+
+    def _websocket_timeout_send_ping(self, contextId, pingTimeout):
+        pingSeq = self.nonce()
+        pingSeqStr = str(pingSeq)
+        data = {
+            'id': pingSeqStr,
+            'type': "ping",
+        }
+        print("PING:" + pingSeq)
+        self.websocketSendJson(data, contextId)
+        pongTimers = self._contextGet(contextId, 'pongtimers')
+        if pongTimers is None:
+            pongTimers = []
+        newPongTimer = self._setTimeout(contextId, pingTimeout, self._websocketMethodMap('_websocketTimeoutPong'), [contextId, pingSeq])
+        pongTimers[pingSeqStr] = newPongTimer
+        self._contextSet(contextId, 'pongtimers', pongTimers)
+
+    def _websocket_timeout_pong(self, contextId, sequence):
+        self.emit('err', ExchangeError(self.id + ' no pong received for ' + sequence), contextId)
+
+    def _websocket_on_message(self, contextId, data):
+        # print(data)
+        msg = json.loads(data)
+        msgType = self.safe_string(msg, 'type')
+        if msgType == 'message':
+            subject = self.safe_string(msg, 'subject')
+            #if subject == 'trade.l3match':
+            if (subject.find('trade.l3') == 0){
+                self._websocket_handle_trade(contextId, msg)
+            elif subject == 'trade.l2update':
+                self._websocket_handle_ob(contextId, msg)
+        elif msgType == 'pong':
+            pingSeq = self.safe_integer(msg, 'id')
+            print("PONG:" + pingSeq)
+            pongTimers = self._contextGet(contextId, 'pongtimers')
+            if pingSeq in pongTimers:
+                timer = pongTimers[pingSeq]
+                self._cancelTimeout(timer)
+                self.omit(pongTimers, pingSeq)
+                self._contextSet(contextId, 'pongtimers', pongTimers)
+            pingInterval = self._contextGet(contextId, 'pingInterval')
+            pingTimeout = self._contextGet(contextId, 'pingTimeout')
+            self._websocket_restart_ping_timer(contextId, pingInterval, pingTimeout)
+        elif msgType == 'ack':
+            nonceId = self.safe_integer(msg, 'id')
+            nonceIdStr = str(nonceId)
+            self.emit(nonceIdStr, True)
+        elif msgType == 'welcome':
+            self.emit('welcome', True)
+        else:
+            print(data)
+
+    def _websocket_handle_trade(self, contextId, msg):
+        # check sequence
+        subject = self.safe_string(msg, 'subject')
+        data = self.safe_value(msg, 'data')
+        lastSeqId = self._contextGet(contextId, 'trade_sequence_id')
+        seqId = self.safe_integer(msg['data'], 'sequence')
+        if lastSeqId is not None:
+            lastSeqId = lastSeqId + 1
+            if lastSeqId != seqId:
+                self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(lastSeqId) + '+1 !=' + str(seqId) + ')'), contextId)
+                return
+        self._contextSet(contextId, 'trade_sequence_id', seqId)
+        if subject == 'trade.l3match':
+            # trade
+            if data['side'] == 'sell':
+                data['orderId'] = data['makerOrderId']; 
+            else:
+                data['orderId'] = data['takerOrderId']; 
+            trade = self.parse_trade(data)
+            trade['info'] = msg
+            trade['type'] = None
+            self.emit('trade', trade['symbol'], trade)
+
+    def _websocket_handle_ob(self, contextId, msg):
+        lastSeqId = self._contextGet(contextId, 'ob_sequence_id')
+        seqIdStart = self.safe_integer(msg['data'], 'sequenceStart')
+        seqIdEnd = self.safe_integer(msg['data'], 'sequenceEnd')
+        if lastSeqId is not None:
+            lastSeqId = lastSeqId + 1
+            if lastSeqId != seqIdStart:
+                self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(lastSeqId) + ' !=' + str(seqIdStart) + ')'), contextId)
+                return
+        self._contextSet(contextId, 'ob_sequence_id', seqIdEnd)
+        symbolId = self.safe_string(msg['data'], 'symbol')
+        symbol = self.find_symbol(symbolId)
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if 'ob' in symbolData:
+            # ob generated previously
+            data = msg['data']
+            obSequence = symbolData['lastSequence']
+            ob = symbolData['ob']
+            ob = self._websocket_process_order_book_delta(contextId, ob, msg, obSequence, True)
+            obSequence = self.safe_integer(data, 'sequenceEnd')
+            symbolData['lastSequence'] = obSequence
+            symbolData['ob'] = ob
+            self.emit('ob', symbol, self._cloneOrderBook(symbolData['ob'], symbolData['limit']))
+            self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+        else:
+            deltas = []
+            if 'deltas' in symbolData:
+                deltas = symbolData['deltas']
+            if len((deltas) == 0) or len((deltas) > 100):
+                deltas = []
+                deltas.append(msg)
+                symbolData['deltas'] = deltas
+                self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+                self._websocket_request_first_order_book(contextId, symbol)
+            else:
+                deltas.append(msg)
+                symbolData['deltas'] = deltas
+                self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+
+    def _websocket_request_first_order_book(self, contextId, symbol):
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        restRequestMs = self.milliseconds()
+        symbolData['restRequestMs'] = restRequestMs
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+        self._awaitMethod(contextId, self._websocketMethodMap('fetchOrderBook'), [symbol], self._websocketMethodMap('_websocketProcessFirstOrderBook'), [contextId, symbol, restRequestMs])
+
+    def _websocket_process_first_order_book(self, ob, contextId, symbol, restRequestMs):
+        # ob = await self.fetch_order_book(symbol)
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if not 'restRequestMs' in symbolData:
+            # not current request
+            return
+        if symbolData['restRequestMs'] != restRequestMs:
+            # not current request
+            return
+        deltas = symbolData['deltas']
+        # process orderbook deltas
+        currentObSequence = ob['timestamp']
+        obSequence = currentObSequence
+        checkLastSequence = False
+        for i in range(0, len(deltas)):
+            delta = deltas[i]
+            ob = self._websocket_process_order_book_delta(contextId, ob, delta, obSequence, checkLastSequence)
+            data = delta['data']
+            sequenceEnd = self.safe_integer(data, 'sequenceEnd')
+            if sequenceEnd > obSequence:
+                checkLastSequence = True
+                obSequence = sequenceEnd
+        symbolData['deltas'] = None
+        symbolData['lastSequence'] = obSequence
+        symbolData['ob'] = ob
+        self.emit('ob', symbol, self._cloneOrderBook(symbolData['ob'], symbolData['limit']))
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+
+    def _websocket_process_order_book_delta(self, contextId, ob, delta, lastSequence, checkLastSequence):
+        data = delta['data']
+        sequenceStart = self.safe_integer(data, 'sequenceStart')
+        nextSequence = lastSequence + 1
+        if checkLastSequence and(nextSequence != sequenceStart):
+            self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(nextSequence) + ' !=' + str(sequenceStart) + ')'), contextId)
+            return
+        sequenceEnd = self.safe_integer(data, 'sequenceEnd')
+        if lastSequence < sequenceEnd:
+            # process it
+            changes = self.safe_value(data, 'changes')
+            keys = list(changes.keys())
+            for k in range(0, len(keys)):
+                isBid = (keys[k] == 'bids')
+                bidsOrAsks = self.safe_value(changes, keys[k])
+                for a in range(0, len(bidsOrAsks)):
+                    bidOrAsk = bidsOrAsks[a]
+                    price = float(bidOrAsk[0])
+                    amount = float(bidOrAsk[1])
+                    sequence = int(bidOrAsk[2])
+                    if lastSequence < sequence:
+                        self.updateBidAsk([price, amount], ob[keys[k]], isBid)
+        return ob
+
+    def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob' and event != 'trade':
+            raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        id = self.market_id(symbol).upper()
+        payload = None
+        symbolData = self._contextGetSymbolData(contextId, event, symbol)
+        if event == 'ob':
+            payload = {
+                "id": nonce,                          
+                "type": "subscribe",
+                "topic": "/market/level2:" + id,
+                "response": True                              
+            }
+            symbolData['limit'] = self.safe_integer(params, 'limit', None)
+        elif event == 'trade':
+            payload = {
+                "id": nonce,                          
+                "type": "subscribe",
+                #"topic": "/market/match:" + id,
+                "topic": "/market/level3:" + id,
+                "privateChannel": False,                      
+                "response": True                              
+            }
+        self._contextSetSymbolData(contextId, event, symbol, symbolData)
+        self.websocketSendJson(payload)
+
+    def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
+        if event != 'ob' and event != 'trade':
+            raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
+        id = self.market_id(symbol).upper()
+        payload = None
+        if event == 'ob':
+            payload = {
+                "id": nonce,                          
+                "type": "unsubscribe",
+                "topic": "/market/level2:" + id,
+                "response": True                              
+            }
+        elif event == 'trade':
+            payload = {
+                "id": nonce,                          
+                "type": "unsubscribe",
+                #"topic": "/market/match:" + id,
+                "topic": "/market/level3:" + id,
+                "privateChannel": False,                      
+                "response": True                              
+            }
+        self.websocketSendJson(payload)

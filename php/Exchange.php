@@ -3685,6 +3685,23 @@ abstract class Exchange extends CcxtEventEmitter {
         return $this->wsconf['methodmap'][$key];
     }
 
+    protected function _awaitMethod ($contextId, $method, $params, $callbackMethod, $callbackParams, $thisParam = null) {
+        // do sequentially
+        $thisParam = ($thisParam !== null) ? $thisParam : $this;
+        $that = $this;
+        try {
+            $response = call_user_func_array (array ($thisParam, $method), $params);
+            array_unshift ($callbackParams, $response);
+            try {
+                call_user_func_array (array ($thisParam, $callbackMethod), $callbackParams);
+            } catch (Exception $ex) {
+                $that.emit ('err', new ExchangeError ($that->id . ': error invoking method ' . $callbackMethod . ': '. $ex), $contextId);
+            }
+        } catch (Exception $ex) {
+            $that.emit ('err', new ExchangeError ($that->id . ': error invoking method ' . $method . ': '. $ex), $contextId);
+        }
+    }
+
     protected function _setTimeout ($contextId, $mseconds, $method, $params, $thisParam = null) {
         $thisParam = ($thisParam !== null) ? $thisParam : $this;
         $that = $this;
@@ -3692,7 +3709,7 @@ abstract class Exchange extends CcxtEventEmitter {
             try {
                 call_user_func_array (array ($thisParam, $method), $params);
             } catch (Exception $ex) {
-                $that.emit ('err', new ExchangeError ($that->id . ': error invoking method ' . $method . ': '. ex), $contextId);
+                $that.emit ('err', new ExchangeError ($that->id . ': error invoking method ' . $method . ': '. $ex), $contextId);
             }
         });
     }
