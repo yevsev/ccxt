@@ -1675,6 +1675,16 @@ class kucoin extends Exchange {
             $nonceId = $this->safe_integer($msg, 'id');
             $nonceIdStr = (string) $nonceId;
             $this->emit ($nonceIdStr, true);
+        } else if ($msgType === 'error') {
+            $nonceId = $this->safe_integer($msg, 'id', null);
+            $code = $this->safe_integer($msg, 'code');
+            $error = $this->safe_string($msg, 'data');
+            $ex = new NetworkError ($error . ' ('+ $code . ')');
+            if ($nonceId !== null) {
+                $nonceIdStr = (string) $nonceId;
+                $this->emit ($nonceIdStr, false, $ex);
+            }
+            $this->emit ('err', $ex, $contextId);
         } else if ($msgType === 'welcome') {
             $this->emit ('welcome', true);
         }
@@ -1684,9 +1694,9 @@ class kucoin extends Exchange {
         // check sequence
         $subject = $this->safe_string($msg, 'subject');
         $data = $this->safe_value($msg, 'data');
-        $symbolId = $this->safe_string($data, 'symbol');
-        $symbol = $this->find_symbol($symbolId);
-        $symbolData = $this->_contextGetSymbolData ($contextId, 'trade', $symbol);
+        // $symbolId = $this->safe_string($data, 'symbol');
+        // $symbol = $this->find_symbol($symbolId);
+        // $symbolData = $this->_contextGetSymbolData ($contextId, 'trade', $symbol);
         // $seqId = $this->safe_integer($msg['data'], 'sequence');
         // if (is_array($symbolData) && array_key_exists('trade_sequence_id', $symbolData)) {
         //    $lastSeqId = $symbolData['trade_sequence_id'];

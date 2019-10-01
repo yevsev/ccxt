@@ -1562,6 +1562,15 @@ class kucoin (Exchange):
             nonceId = self.safe_integer(msg, 'id')
             nonceIdStr = str(nonceId)
             self.emit(nonceIdStr, True)
+        elif msgType == 'error':
+            nonceId = self.safe_integer(msg, 'id', None)
+            code = self.safe_integer(msg, 'code')
+            error = self.safe_string(msg, 'data')
+            ex = NetworkError(error + '('+ code + ')')
+            if nonceId is not None:
+                nonceIdStr = str(nonceId)
+                self.emit(nonceIdStr, False, ex)
+            self.emit('err', ex, contextId)
         elif msgType == 'welcome':
             self.emit('welcome', True)
 
@@ -1569,9 +1578,9 @@ class kucoin (Exchange):
         # check sequence
         subject = self.safe_string(msg, 'subject')
         data = self.safe_value(msg, 'data')
-        symbolId = self.safe_string(data, 'symbol')
-        symbol = self.find_symbol(symbolId)
-        symbolData = self._contextGetSymbolData(contextId, 'trade', symbol)
+        # symbolId = self.safe_string(data, 'symbol')
+        # symbol = self.find_symbol(symbolId)
+        # symbolData = self._contextGetSymbolData(contextId, 'trade', symbol)
         # seqId = self.safe_integer(msg['data'], 'sequence')
         # if 'trade_sequence_id' in symbolData:
         #    lastSeqId = symbolData['trade_sequence_id']

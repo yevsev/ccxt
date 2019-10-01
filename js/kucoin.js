@@ -1674,6 +1674,16 @@ module.exports = class kucoin extends Exchange {
             const nonceId = this.safeInteger (msg, 'id');
             const nonceIdStr = nonceId.toString ();
             this.emit (nonceIdStr, true);
+        } else if (msgType === 'error') {
+            const nonceId = this.safeInteger (msg, 'id', undefined);
+            const code = this.safeInteger (msg, 'code');
+            const error = this.safeString (msg, 'data');
+            const ex = new NetworkError (error + ' ('+ code + ')');
+            if (nonceId !== undefined) {
+                const nonceIdStr = nonceId.toString ();
+                this.emit (nonceIdStr, false, ex);
+            }
+            this.emit ('err', ex, contextId);
         } else if (msgType === 'welcome') {
             this.emit ('welcome', true);
         }
@@ -1683,9 +1693,9 @@ module.exports = class kucoin extends Exchange {
         // check sequence
         const subject = this.safeString (msg, 'subject');
         const data = this.safeValue (msg, 'data');
-        const symbolId = this.safeString (data, 'symbol');
-        const symbol = this.findSymbol (symbolId);
-        const symbolData = this._contextGetSymbolData (contextId, 'trade', symbol);
+        // const symbolId = this.safeString (data, 'symbol');
+        // const symbol = this.findSymbol (symbolId);
+        // const symbolData = this._contextGetSymbolData (contextId, 'trade', symbol);
         // const seqId = this.safeInteger (msg['data'], 'sequence');
         // if ('trade_sequence_id' in symbolData) {
         //    let lastSeqId = symbolData['trade_sequence_id'];
