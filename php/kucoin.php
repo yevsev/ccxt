@@ -1687,7 +1687,7 @@ class kucoin extends Exchange {
         $lastSeqId = $this->_contextGet ($contextId, 'trade_sequence_id');
         $seqId = $this->safe_integer($msg['data'], 'sequence');
         if ($lastSeqId !== null) {
-            $lastSeqId = $lastSeqId . 1;
+            $lastSeqId++;
             if ($lastSeqId !== $seqId) {
                 $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $lastSeqId . '+1 !=' . (string) $seqId . ')'), $contextId);
                 return;
@@ -1713,7 +1713,7 @@ class kucoin extends Exchange {
         $seqIdStart = $this->safe_integer($msg['data'], 'sequenceStart');
         $seqIdEnd = $this->safe_integer($msg['data'], 'sequenceEnd');
         if ($lastSeqId !== null) {
-            $lastSeqId = $lastSeqId . 1;
+            $lastSeqId++;
             if ($lastSeqId !== $seqIdStart) {
                 $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $lastSeqId . ' !=' . (string) $seqIdStart . ')'), $contextId);
                 return;
@@ -1797,7 +1797,8 @@ class kucoin extends Exchange {
     public function _websocket_process_order_book_delta ($contextId, $ob, $delta, $lastSequence, $checkLastSequence) {
         $data = $delta['data'];
         $sequenceStart = $this->safe_integer($data, 'sequenceStart');
-        $nextSequence = $lastSequence . 1;
+        $nextSequence = $lastSequence;
+        $nextSequence++;
         if ($checkLastSequence && ($nextSequence !== $sequenceStart)) {
             $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $nextSequence . ' !=' . (string) $sequenceStart . ')'), $contextId);
             return;

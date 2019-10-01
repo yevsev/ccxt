@@ -1686,7 +1686,7 @@ module.exports = class kucoin extends Exchange {
         let lastSeqId = this._contextGet (contextId, 'trade_sequence_id');
         const seqId = this.safeInteger (msg['data'], 'sequence');
         if (typeof lastSeqId !== 'undefined') {
-            lastSeqId = lastSeqId + 1;
+            lastSeqId++;
             if (lastSeqId !== seqId) {
                 this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + lastSeqId.toString () + '+1 !=' + seqId.toString () + ')'), contextId);
                 return;
@@ -1712,7 +1712,7 @@ module.exports = class kucoin extends Exchange {
         const seqIdStart = this.safeInteger (msg['data'], 'sequenceStart');
         const seqIdEnd = this.safeInteger (msg['data'], 'sequenceEnd');
         if (typeof lastSeqId !== 'undefined') {
-            lastSeqId = lastSeqId + 1;
+            lastSeqId++;
             if (lastSeqId !== seqIdStart) {
                 this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + lastSeqId.toString () + ' !=' + seqIdStart.toString () + ')'), contextId);
                 return;
@@ -1796,7 +1796,8 @@ module.exports = class kucoin extends Exchange {
     _websocketProcessOrderBookDelta (contextId, ob, delta, lastSequence, checkLastSequence) {
         const data = delta['data'];
         const sequenceStart = this.safeInteger (data, 'sequenceStart');
-        const nextSequence = lastSequence + 1;
+        const nextSequence = lastSequence;
+        nextSequence++;
         if (checkLastSequence && (nextSequence !== sequenceStart)) {
             this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + nextSequence.toString () + ' !=' + sequenceStart.toString () + ')'), contextId);
             return;

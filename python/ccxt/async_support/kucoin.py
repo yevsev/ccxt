@@ -1572,7 +1572,7 @@ class kucoin (Exchange):
         lastSeqId = self._contextGet(contextId, 'trade_sequence_id')
         seqId = self.safe_integer(msg['data'], 'sequence')
         if lastSeqId is not None:
-            lastSeqId = lastSeqId + 1
+            lastSeqId++
             if lastSeqId != seqId:
                 self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(lastSeqId) + '+1 !=' + str(seqId) + ')'), contextId)
                 return
@@ -1593,7 +1593,7 @@ class kucoin (Exchange):
         seqIdStart = self.safe_integer(msg['data'], 'sequenceStart')
         seqIdEnd = self.safe_integer(msg['data'], 'sequenceEnd')
         if lastSeqId is not None:
-            lastSeqId = lastSeqId + 1
+            lastSeqId++
             if lastSeqId != seqIdStart:
                 self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(lastSeqId) + ' !=' + str(seqIdStart) + ')'), contextId)
                 return
@@ -1665,7 +1665,8 @@ class kucoin (Exchange):
     def _websocket_process_order_book_delta(self, contextId, ob, delta, lastSequence, checkLastSequence):
         data = delta['data']
         sequenceStart = self.safe_integer(data, 'sequenceStart')
-        nextSequence = lastSequence + 1
+        nextSequence = lastSequence
+        nextSequence++
         if checkLastSequence and(nextSequence != sequenceStart):
             self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(nextSequence) + ' !=' + str(sequenceStart) + ')'), contextId)
             return
