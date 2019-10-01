@@ -1683,16 +1683,20 @@ module.exports = class kucoin extends Exchange {
         // check sequence
         const subject = this.safeString (msg, 'subject');
         const data = this.safeValue (msg, 'data');
-        let lastSeqId = this._contextGet (contextId, 'trade_sequence_id');
+        const symbolId = this.safeString (data, 'symbol');
+        const symbol = this.findSymbol (symbolId);
+        const symbolData = this._contextGetSymbolData (contextId, 'trade', symbol);
         const seqId = this.safeInteger (msg['data'], 'sequence');
-        if (typeof lastSeqId !== 'undefined') {
+        if ('trade_sequence_id' in symbolData) {
+            let lastSeqId = symbolData['trade_sequence_id'];
             lastSeqId++;
             if (lastSeqId !== seqId) {
                 this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + lastSeqId.toString () + '+1 !=' + seqId.toString () + ')'), contextId);
                 return;
             }
         }
-        this._contextSet (contextId, 'trade_sequence_id', seqId);
+        symbolData['trade_sequence_id'] = seqId;
+        this._contextSetSymbolData (contextId, 'trade', symbol, symbolData);
         if (subject === 'trade.l3match') {
             // trade
             if (data['side'] === 'sell') {
@@ -1708,20 +1712,21 @@ module.exports = class kucoin extends Exchange {
     }
 
     _websocketHandleOb (contextId, msg) {
-        let lastSeqId = this._contextGet (contextId, 'ob_sequence_id');
+        const symbolId = this.safeString (msg['data'], 'symbol');
+        const symbol = this.findSymbol (symbolId);
         const seqIdStart = this.safeInteger (msg['data'], 'sequenceStart');
         const seqIdEnd = this.safeInteger (msg['data'], 'sequenceEnd');
-        if (typeof lastSeqId !== 'undefined') {
+        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if ('ob_sequence_id' in symbolData) {
+            let lastSeqId = symbolData['ob_sequence_id'];
             lastSeqId++;
             if (lastSeqId !== seqIdStart) {
                 this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + lastSeqId.toString () + ' !=' + seqIdStart.toString () + ')'), contextId);
                 return;
             }
         }
-        this._contextSet (contextId, 'ob_sequence_id', seqIdEnd);
-        const symbolId = this.safeString (msg['data'], 'symbol');
-        const symbol = this.findSymbol (symbolId);
-        const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        symbolData['ob_sequence_id'] = seqIdEnd;
+        this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
         if ('ob' in symbolData) {
             // ob generated previously
             const data = msg['data'];
@@ -1796,7 +1801,7 @@ module.exports = class kucoin extends Exchange {
     _websocketProcessOrderBookDelta (contextId, ob, delta, lastSequence, checkLastSequence) {
         const data = delta['data'];
         const sequenceStart = this.safeInteger (data, 'sequenceStart');
-        const nextSequence = lastSequence;
+        let nextSequence = lastSequence;
         nextSequence++;
         if (checkLastSequence && (nextSequence !== sequenceStart)) {
             this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + nextSequence.toString () + ' !=' + sequenceStart.toString () + ')'), contextId);

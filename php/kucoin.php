@@ -1684,16 +1684,20 @@ class kucoin extends Exchange {
         // check sequence
         $subject = $this->safe_string($msg, 'subject');
         $data = $this->safe_value($msg, 'data');
-        $lastSeqId = $this->_contextGet ($contextId, 'trade_sequence_id');
+        $symbolId = $this->safe_string($data, 'symbol');
+        $symbol = $this->find_symbol($symbolId);
+        $symbolData = $this->_contextGetSymbolData ($contextId, 'trade', $symbol);
         $seqId = $this->safe_integer($msg['data'], 'sequence');
-        if ($lastSeqId !== null) {
+        if (is_array($symbolData) && array_key_exists('trade_sequence_id', $symbolData)) {
+            $lastSeqId = $symbolData['trade_sequence_id'];
             $lastSeqId++;
             if ($lastSeqId !== $seqId) {
                 $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $lastSeqId . '+1 !=' . (string) $seqId . ')'), $contextId);
                 return;
             }
         }
-        $this->_contextSet ($contextId, 'trade_sequence_id', $seqId);
+        $symbolData['trade_sequence_id'] = $seqId;
+        $this->_contextSetSymbolData ($contextId, 'trade', $symbol, $symbolData);
         if ($subject === 'trade.l3match') {
             // $trade
             if ($data['side'] === 'sell') {
@@ -1709,20 +1713,21 @@ class kucoin extends Exchange {
     }
 
     public function _websocket_handle_ob ($contextId, $msg) {
-        $lastSeqId = $this->_contextGet ($contextId, 'ob_sequence_id');
+        $symbolId = $this->safe_string($msg['data'], 'symbol');
+        $symbol = $this->find_symbol($symbolId);
         $seqIdStart = $this->safe_integer($msg['data'], 'sequenceStart');
         $seqIdEnd = $this->safe_integer($msg['data'], 'sequenceEnd');
-        if ($lastSeqId !== null) {
+        $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        if (is_array($symbolData) && array_key_exists('ob_sequence_id', $symbolData)) {
+            $lastSeqId = $symbolData['ob_sequence_id'];
             $lastSeqId++;
             if ($lastSeqId !== $seqIdStart) {
                 $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $lastSeqId . ' !=' . (string) $seqIdStart . ')'), $contextId);
                 return;
             }
         }
-        $this->_contextSet ($contextId, 'ob_sequence_id', $seqIdEnd);
-        $symbolId = $this->safe_string($msg['data'], 'symbol');
-        $symbol = $this->find_symbol($symbolId);
-        $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
+        $symbolData['ob_sequence_id'] = $seqIdEnd;
+        $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
         if (is_array($symbolData) && array_key_exists('ob', $symbolData)) {
             // $ob generated previously
             $data = $msg['data'];

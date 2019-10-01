@@ -1569,14 +1569,18 @@ class kucoin (Exchange):
         # check sequence
         subject = self.safe_string(msg, 'subject')
         data = self.safe_value(msg, 'data')
-        lastSeqId = self._contextGet(contextId, 'trade_sequence_id')
+        symbolId = self.safe_string(data, 'symbol')
+        symbol = self.find_symbol(symbolId)
+        symbolData = self._contextGetSymbolData(contextId, 'trade', symbol)
         seqId = self.safe_integer(msg['data'], 'sequence')
-        if lastSeqId is not None:
+        if 'trade_sequence_id' in symbolData:
+            lastSeqId = symbolData['trade_sequence_id']
             lastSeqId++
             if lastSeqId != seqId:
                 self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(lastSeqId) + '+1 !=' + str(seqId) + ')'), contextId)
                 return
-        self._contextSet(contextId, 'trade_sequence_id', seqId)
+        symbolData['trade_sequence_id'] = seqId
+        self._contextSetSymbolData(contextId, 'trade', symbol, symbolData)
         if subject == 'trade.l3match':
             # trade
             if data['side'] == 'sell':
@@ -1589,18 +1593,19 @@ class kucoin (Exchange):
             self.emit('trade', trade['symbol'], trade)
 
     def _websocket_handle_ob(self, contextId, msg):
-        lastSeqId = self._contextGet(contextId, 'ob_sequence_id')
+        symbolId = self.safe_string(msg['data'], 'symbol')
+        symbol = self.find_symbol(symbolId)
         seqIdStart = self.safe_integer(msg['data'], 'sequenceStart')
         seqIdEnd = self.safe_integer(msg['data'], 'sequenceEnd')
-        if lastSeqId is not None:
+        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        if 'ob_sequence_id' in symbolData:
+            lastSeqId = symbolData['ob_sequence_id']
             lastSeqId++
             if lastSeqId != seqIdStart:
                 self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(lastSeqId) + ' !=' + str(seqIdStart) + ')'), contextId)
                 return
-        self._contextSet(contextId, 'ob_sequence_id', seqIdEnd)
-        symbolId = self.safe_string(msg['data'], 'symbol')
-        symbol = self.find_symbol(symbolId)
-        symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
+        symbolData['ob_sequence_id'] = seqIdEnd
+        self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
         if 'ob' in symbolData:
             # ob generated previously
             data = msg['data']
