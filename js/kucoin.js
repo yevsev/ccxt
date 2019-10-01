@@ -1652,8 +1652,8 @@ module.exports = class kucoin extends Exchange {
         const msgType = this.safeString (msg, 'type');
         if (msgType === 'message') {
             const subject = this.safeString (msg, 'subject');
-            // if (subject === 'trade.l3match') {
-            if (subject.indexOf ('trade.l3') === 0) {
+            if (subject === 'trade.l3match') {
+            // if (subject.indexOf ('trade.l3') === 0) {
                 this._websocketHandleTrade (contextId, msg);
             } else if (subject === 'trade.l2update') {
                 this._websocketHandleOb (contextId, msg);
@@ -1686,17 +1686,17 @@ module.exports = class kucoin extends Exchange {
         const symbolId = this.safeString (data, 'symbol');
         const symbol = this.findSymbol (symbolId);
         const symbolData = this._contextGetSymbolData (contextId, 'trade', symbol);
-        const seqId = this.safeInteger (msg['data'], 'sequence');
-        if ('trade_sequence_id' in symbolData) {
-            let lastSeqId = symbolData['trade_sequence_id'];
-            lastSeqId++;
-            if (lastSeqId !== seqId) {
-                this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + lastSeqId.toString () + '+1 !=' + seqId.toString () + ')'), contextId);
-                return;
-            }
-        }
-        symbolData['trade_sequence_id'] = seqId;
-        this._contextSetSymbolData (contextId, 'trade', symbol, symbolData);
+        // const seqId = this.safeInteger (msg['data'], 'sequence');
+        // if ('trade_sequence_id' in symbolData) {
+        //    let lastSeqId = symbolData['trade_sequence_id'];
+        //    lastSeqId++;
+        //    if (lastSeqId !== seqId) {
+        //        this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + lastSeqId.toString () + '+1 !=' + seqId.toString () + ')'), contextId);
+        //        return;
+        //    }
+        // }
+        // symbolData['trade_sequence_id'] = seqId;
+        // this._contextSetSymbolData (contextId, 'trade', symbol, symbolData);
         if (subject === 'trade.l3match') {
             // trade
             if (data['side'] === 'sell') {
@@ -1848,8 +1848,8 @@ module.exports = class kucoin extends Exchange {
             payload = {
                 'id': nonce,
                 'type': 'subscribe',
-                // 'topic': '/market/match:' + id,
-                'topic': '/market/level3:' + id,
+                'topic': '/market/match:' + id,
+                // 'topic': '/market/level3:' + id,
                 'privateChannel': false,
                 'response': true,
             };
@@ -1875,8 +1875,8 @@ module.exports = class kucoin extends Exchange {
             payload = {
                 'id': nonce,
                 'type': 'unsubscribe',
-                // 'topic': '/market/match:' + id,
-                'topic': '/market/level3:' + id,
+                'topic': '/market/match:' + id,
+                // 'topic': '/market/level3:' + id,
                 'privateChannel': false,
                 'response': true,
             };

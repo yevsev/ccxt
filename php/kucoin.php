@@ -1653,8 +1653,8 @@ class kucoin extends Exchange {
         $msgType = $this->safe_string($msg, 'type');
         if ($msgType === 'message') {
             $subject = $this->safe_string($msg, 'subject');
-            // if ($subject === 'trade.l3match') {
-            if (mb_strpos($subject, 'trade.l3') === 0) {
+            if ($subject === 'trade.l3match') {
+            // if (mb_strpos($subject, 'trade.l3') === 0) {
                 $this->_websocket_handle_trade ($contextId, $msg);
             } else if ($subject === 'trade.l2update') {
                 $this->_websocket_handle_ob ($contextId, $msg);
@@ -1687,17 +1687,17 @@ class kucoin extends Exchange {
         $symbolId = $this->safe_string($data, 'symbol');
         $symbol = $this->find_symbol($symbolId);
         $symbolData = $this->_contextGetSymbolData ($contextId, 'trade', $symbol);
-        $seqId = $this->safe_integer($msg['data'], 'sequence');
-        if (is_array($symbolData) && array_key_exists('trade_sequence_id', $symbolData)) {
-            $lastSeqId = $symbolData['trade_sequence_id'];
-            $lastSeqId++;
-            if ($lastSeqId !== $seqId) {
-                $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $lastSeqId . '+1 !=' . (string) $seqId . ')'), $contextId);
-                return;
-            }
-        }
-        $symbolData['trade_sequence_id'] = $seqId;
-        $this->_contextSetSymbolData ($contextId, 'trade', $symbol, $symbolData);
+        // $seqId = $this->safe_integer($msg['data'], 'sequence');
+        // if (is_array($symbolData) && array_key_exists('trade_sequence_id', $symbolData)) {
+        //    $lastSeqId = $symbolData['trade_sequence_id'];
+        //    $lastSeqId++;
+        //    if ($lastSeqId !== $seqId) {
+        //        $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $lastSeqId . '+1 !=' . (string) $seqId . ')'), $contextId);
+        //        return;
+        //    }
+        // }
+        // $symbolData['trade_sequence_id'] = $seqId;
+        // $this->_contextSetSymbolData ($contextId, 'trade', $symbol, $symbolData);
         if ($subject === 'trade.l3match') {
             // $trade
             if ($data['side'] === 'sell') {
@@ -1849,8 +1849,8 @@ class kucoin extends Exchange {
             $payload = array (
                 'id' => $nonce,
                 'type' => 'subscribe',
-                // 'topic' => '/market/match:' . $id,
-                'topic' => '/market/level3:' . $id,
+                'topic' => '/market/match:' . $id,
+                // 'topic' => '/market/level3:' . $id,
                 'privateChannel' => false,
                 'response' => true,
             );
@@ -1876,8 +1876,8 @@ class kucoin extends Exchange {
             $payload = array (
                 'id' => $nonce,
                 'type' => 'unsubscribe',
-                // 'topic' => '/market/match:' . $id,
-                'topic' => '/market/level3:' . $id,
+                'topic' => '/market/match:' . $id,
+                // 'topic' => '/market/level3:' . $id,
                 'privateChannel' => false,
                 'response' => true,
             );

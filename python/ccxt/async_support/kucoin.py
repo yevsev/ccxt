@@ -1542,8 +1542,8 @@ class kucoin (Exchange):
         msgType = self.safe_string(msg, 'type')
         if msgType == 'message':
             subject = self.safe_string(msg, 'subject')
-            # if subject == 'trade.l3match':
-            if subject.find('trade.l3') == 0:
+            if subject == 'trade.l3match':
+            # if subject.find('trade.l3') == 0:
                 self._websocket_handle_trade(contextId, msg)
             elif subject == 'trade.l2update':
                 self._websocket_handle_ob(contextId, msg)
@@ -1572,15 +1572,17 @@ class kucoin (Exchange):
         symbolId = self.safe_string(data, 'symbol')
         symbol = self.find_symbol(symbolId)
         symbolData = self._contextGetSymbolData(contextId, 'trade', symbol)
-        seqId = self.safe_integer(msg['data'], 'sequence')
-        if 'trade_sequence_id' in symbolData:
-            lastSeqId = symbolData['trade_sequence_id']
-            lastSeqId++
-            if lastSeqId != seqId:
-                self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(lastSeqId) + '+1 !=' + str(seqId) + ')'), contextId)
-                return
-        symbolData['trade_sequence_id'] = seqId
-        self._contextSetSymbolData(contextId, 'trade', symbol, symbolData)
+        # seqId = self.safe_integer(msg['data'], 'sequence')
+        # if 'trade_sequence_id' in symbolData:
+        #    lastSeqId = symbolData['trade_sequence_id']
+        #    lastSeqId++
+        #    if lastSeqId != seqId:
+        #        self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(lastSeqId) + '+1 !=' + str(seqId) + ')'), contextId)
+        #        return
+        #    }
+        #}
+        # symbolData['trade_sequence_id'] = seqId
+        # self._contextSetSymbolData(contextId, 'trade', symbol, symbolData)
         if subject == 'trade.l3match':
             # trade
             if data['side'] == 'sell':
@@ -1710,8 +1712,8 @@ class kucoin (Exchange):
             payload = {
                 'id': nonce,
                 'type': 'subscribe',
-                # 'topic': '/market/match:' + id,
-                'topic': '/market/level3:' + id,
+                'topic': '/market/match:' + id,
+                # 'topic': '/market/level3:' + id,
                 'privateChannel': False,
                 'response': True,
             }
@@ -1734,8 +1736,8 @@ class kucoin (Exchange):
             payload = {
                 'id': nonce,
                 'type': 'unsubscribe',
-                # 'topic': '/market/match:' + id,
-                'topic': '/market/level3:' + id,
+                'topic': '/market/match:' + id,
+                # 'topic': '/market/level3:' + id,
                 'privateChannel': False,
                 'response': True,
             }
