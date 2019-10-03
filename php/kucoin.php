@@ -210,6 +210,13 @@ class kucoin extends Exchange {
                             'id' => '{id}',
                         ),
                     ),
+                    'ticker' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                        ),
+                    ),
                 ),
             ),
         ));
@@ -1658,6 +1665,8 @@ class kucoin extends Exchange {
                 $this->_websocket_handle_trade ($contextId, $msg);
             } else if ($subject === 'trade.l2update') {
                 $this->_websocket_handle_ob ($contextId, $msg);
+            } else if ($subject === 'trade.snapshot') {
+                $this->_websocket_handle_ticker ($contextId, $msg);
             }
         } else if ($msgType === 'pong') {
             $pingSeq = $this->safe_integer($msg, 'id');
@@ -1768,6 +1777,29 @@ class kucoin extends Exchange {
         }
     }
 
+    public function _websocket_handle_ticker ($contextId, $msg) {
+        // check sequence
+        // $subject = $this->safe_string($msg, 'subject');
+        $dataSeq = $this->safe_value($msg, 'data');
+        $data = $this->safe_value($dataSeq, 'data');
+        // $symbolId = $this->safe_string($data, 'symbol');
+        // $symbol = $this->find_symbol($symbolId);
+        // $symbolData = $this->_contextGetSymbolData ($contextId, 'ticker', $symbol);
+        // $seqId = $this->safe_integer($dataSeq, 'sequence');
+        // if (is_array($symbolData) && array_key_exists('ticker_sequence_id', $symbolData)) {
+        //    $lastSeqId = $symbolData['ticker_sequence_id'];
+        //    $lastSeqId++;
+        //    if ($lastSeqId !== $seqId) {
+        //        $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $lastSeqId . ' !=' . (string) $seqId . ' +1)'), $contextId);
+        //        return;
+        //    }
+        // }
+        // $symbolData['ticker_sequence_id'] = $seqId;
+        // $this->_contextSetSymbolData ($contextId, 'ticker', $symbol, $symbolData);
+        $ticker = $this->parse_ticker($data);
+        $this->emit ('ticker', $ticker['symbol'], $ticker);
+    }
+
     public function _websocket_request_first_order_book ($contextId, $symbol) {
         $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
         $restRequestMs = $this->milliseconds ();
@@ -1841,7 +1873,7 @@ class kucoin extends Exchange {
     }
 
     public function _websocket_subscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
-        if ($event !== 'ob' && $event !== 'trade') {
+        if ($event !== 'ob' && $event !== 'trade' && $event !== 'ticker') {
             throw new NotSupported('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
         }
         $id = strtoupper($this->market_id ($symbol));
@@ -1864,13 +1896,20 @@ class kucoin extends Exchange {
                 'privateChannel' => false,
                 'response' => true,
             );
+        } else if ($event === 'ticker') {
+            $payload = array (
+                'id' => $nonce,
+                'type' => 'subscribe',
+                'topic' => '/market/snapshot:' . $id,
+                'response' => true,
+            );
         }
         $this->_contextSetSymbolData ($contextId, $event, $symbol, $symbolData);
         $this->websocketSendJson ($payload);
     }
 
     public function _websocket_unsubscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
-        if ($event !== 'ob' && $event !== 'trade') {
+        if ($event !== 'ob' && $event !== 'trade' && $event !== 'ticker') {
             throw new NotSupported('unsubscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
         }
         $id = strtoupper($this->market_id ($symbol));
@@ -1889,6 +1928,13 @@ class kucoin extends Exchange {
                 'topic' => '/market/match:' . $id,
                 // 'topic' => '/market/level3:' . $id,
                 'privateChannel' => false,
+                'response' => true,
+            );
+        } else if ($event === 'ticker') {
+            $payload = array (
+                'id' => $nonce,
+                'type' => 'unsubscribe',
+                'topic' => '/market/snapshot:' . $id,
                 'response' => true,
             );
         }

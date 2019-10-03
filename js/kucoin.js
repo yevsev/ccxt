@@ -209,6 +209,13 @@ module.exports = class kucoin extends Exchange {
                             'id': '{id}',
                         },
                     },
+                    'ticker': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
         });
@@ -1657,6 +1664,8 @@ module.exports = class kucoin extends Exchange {
                 this._websocketHandleTrade (contextId, msg);
             } else if (subject === 'trade.l2update') {
                 this._websocketHandleOb (contextId, msg);
+            } else if (subject === 'trade.snapshot') {
+                this._websocketHandleTicker (contextId, msg);
             }
         } else if (msgType === 'pong') {
             const pingSeq = this.safeInteger (msg, 'id');
@@ -1767,6 +1776,29 @@ module.exports = class kucoin extends Exchange {
         }
     }
 
+    _websocketHandleTicker (contextId, msg) {
+        // check sequence
+        // const subject = this.safeString (msg, 'subject');
+        const dataSeq = this.safeValue (msg, 'data');
+        const data = this.safeValue (dataSeq, 'data');
+        // const symbolId = this.safeString (data, 'symbol');
+        // const symbol = this.findSymbol (symbolId);
+        // const symbolData = this._contextGetSymbolData (contextId, 'ticker', symbol);
+        // const seqId = this.safeInteger (dataSeq, 'sequence');
+        // if ('ticker_sequence_id' in symbolData) {
+        //    let lastSeqId = symbolData['ticker_sequence_id'];
+        //    lastSeqId++;
+        //    if (lastSeqId !== seqId) {
+        //        this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + lastSeqId.toString () + ' !=' + seqId.toString () + ' +1)'), contextId);
+        //        return;
+        //    }
+        // }
+        // symbolData['ticker_sequence_id'] = seqId;
+        // this._contextSetSymbolData (contextId, 'ticker', symbol, symbolData);
+        const ticker = this.parseTicker (data);
+        this.emit ('ticker', ticker['symbol'], ticker);
+    }
+
     _websocketRequestFirstOrderBook (contextId, symbol) {
         const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         const restRequestMs = this.milliseconds ();
@@ -1840,7 +1872,7 @@ module.exports = class kucoin extends Exchange {
     }
 
     _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
-        if (event !== 'ob' && event !== 'trade') {
+        if (event !== 'ob' && event !== 'trade' && event !== 'ticker') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         const id = this.market_id (symbol).toUpperCase ();
@@ -1863,13 +1895,20 @@ module.exports = class kucoin extends Exchange {
                 'privateChannel': false,
                 'response': true,
             };
+        } else if (event === 'ticker') {
+            payload = {
+                'id': nonce,
+                'type': 'subscribe',
+                'topic': '/market/snapshot:' + id,
+                'response': true,
+            };
         }
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         this.websocketSendJson (payload);
     }
 
     _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
-        if (event !== 'ob' && event !== 'trade') {
+        if (event !== 'ob' && event !== 'trade' && event !== 'ticker') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         const id = this.market_id (symbol).toUpperCase ();
@@ -1888,6 +1927,13 @@ module.exports = class kucoin extends Exchange {
                 'topic': '/market/match:' + id,
                 // 'topic': '/market/level3:' + id,
                 'privateChannel': false,
+                'response': true,
+            };
+        } else if (event === 'ticker') {
+            payload = {
+                'id': nonce,
+                'type': 'unsubscribe',
+                'topic': '/market/snapshot:' + id,
                 'response': true,
             };
         }

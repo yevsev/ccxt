@@ -225,6 +225,13 @@ class kucoin (Exchange):
                             'id': '{id}',
                         },
                     },
+                    'ticker': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
         })
@@ -1547,6 +1554,8 @@ class kucoin (Exchange):
                 self._websocket_handle_trade(contextId, msg)
             elif subject == 'trade.l2update':
                 self._websocket_handle_ob(contextId, msg)
+            elif subject == 'trade.snapshot':
+                self._websocket_handle_ticker(contextId, msg)
         elif msgType == 'pong':
             pingSeq = self.safe_integer(msg, 'id')
             pongTimers = self._contextGet(contextId, 'pongtimers')
@@ -1643,6 +1652,28 @@ class kucoin (Exchange):
                 symbolData['deltas'] = deltas
                 self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
 
+    def _websocket_handle_ticker(self, contextId, msg):
+        # check sequence
+        # subject = self.safe_string(msg, 'subject')
+        dataSeq = self.safe_value(msg, 'data')
+        data = self.safe_value(dataSeq, 'data')
+        # symbolId = self.safe_string(data, 'symbol')
+        # symbol = self.find_symbol(symbolId)
+        # symbolData = self._contextGetSymbolData(contextId, 'ticker', symbol)
+        # seqId = self.safe_integer(dataSeq, 'sequence')
+        # if 'ticker_sequence_id' in symbolData:
+        #    lastSeqId = symbolData['ticker_sequence_id']
+        #    lastSeqId++
+        #    if lastSeqId != seqId:
+        #        self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(lastSeqId) + ' !=' + str(seqId) + ' +1)'), contextId)
+        #        return
+        #    }
+        #}
+        # symbolData['ticker_sequence_id'] = seqId
+        # self._contextSetSymbolData(contextId, 'ticker', symbol, symbolData)
+        ticker = self.parse_ticker(data)
+        self.emit('ticker', ticker['symbol'], ticker)
+
     def _websocket_request_first_order_book(self, contextId, symbol):
         symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
         restRequestMs = self.milliseconds()
@@ -1704,7 +1735,7 @@ class kucoin (Exchange):
         return ob
 
     def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
-        if event != 'ob' and event != 'trade':
+        if event != 'ob' and event != 'trade' and event != 'ticker':
             raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
         id = self.market_id(symbol).upper()
         payload = None
@@ -1726,11 +1757,18 @@ class kucoin (Exchange):
                 'privateChannel': False,
                 'response': True,
             }
+        elif event == 'ticker':
+            payload = {
+                'id': nonce,
+                'type': 'subscribe',
+                'topic': '/market/snapshot:' + id,
+                'response': True,
+            }
         self._contextSetSymbolData(contextId, event, symbol, symbolData)
         self.websocketSendJson(payload)
 
     def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
-        if event != 'ob' and event != 'trade':
+        if event != 'ob' and event != 'trade' and event != 'ticker':
             raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
         id = self.market_id(symbol).upper()
         payload = None
@@ -1748,6 +1786,13 @@ class kucoin (Exchange):
                 'topic': '/market/match:' + id,
                 # 'topic': '/market/level3:' + id,
                 'privateChannel': False,
+                'response': True,
+            }
+        elif event == 'ticker':
+            payload = {
+                'id': nonce,
+                'type': 'unsubscribe',
+                'topic': '/market/snapshot:' + id,
                 'response': True,
             }
         self.websocketSendJson(payload)
