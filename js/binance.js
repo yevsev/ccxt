@@ -1617,7 +1617,7 @@ module.exports = class binance extends Exchange {
                         event = 'trade';
                     } else if (event === 'aggtrade') {
                         event = 'aggtrade';
-                    } else if (event.indexOf ('kline') >= 0) {
+                    } else if (event.indexOf ('ohlcv') >= 0) {
                         event = 'kline';
                     } else if (event.indexOf ('24hrTicker') >= 0) {
                         event = 'ticker';
@@ -1636,12 +1636,13 @@ module.exports = class binance extends Exchange {
             const parameters = this.extend ({
                 'event': element['event'],
                 'symbol': this._websocketMarketId (element['symbol']),
-                'interval': this.safeString (params, 'timeframe'),
+                'interval': this.safeString (params, 'timeframe', '1m'),
             }, params);
             const streamGenerator = this.wsconf['events'][element['event']]['conx-param']['stream'];
             streamList.push (this.implodeParams (streamGenerator, parameters));
         }
         const stream = streamList.join ('/');
+        console.log(options['url'] + stream)
         return options['url'] + stream;
     }
 

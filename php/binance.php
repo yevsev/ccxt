@@ -1617,7 +1617,7 @@ class binance extends Exchange {
                         $event = 'trade';
                     } else if ($event === 'aggtrade') {
                         $event = 'aggtrade';
-                    } else if (mb_strpos($event, 'kline') !== false) {
+                    } else if (mb_strpos($event, 'ohlcv') !== false) {
                         $event = 'kline';
                     } else if (mb_strpos($event, '24hrTicker') !== false) {
                         $event = 'ticker';
@@ -1636,12 +1636,13 @@ class binance extends Exchange {
             $parameters = array_merge (array (
                 'event' => $element['event'],
                 'symbol' => $this->_websocket_market_id ($element['symbol']),
-                'interval' => $this->safe_string($params, 'timeframe'),
+                'interval' => $this->safe_string($params, 'timeframe', '1m'),
             ), $params);
             $streamGenerator = $this->wsconf['events'][$element['event']]['conx-param']['stream'];
             $streamList[] = $this->implode_params($streamGenerator, $parameters);
         }
         $stream = implode('/', $streamList);
+        var_dump($options['url'] . $stream)
         return $options['url'] . $stream;
     }
 

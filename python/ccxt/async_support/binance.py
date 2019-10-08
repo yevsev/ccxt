@@ -1468,7 +1468,7 @@ class binance (Exchange):
                         event = 'trade'
                     elif event == 'aggtrade':
                         event = 'aggtrade'
-                    elif event.find('kline') >= 0:
+                    elif event.find('ohlcv') >= 0:
                         event = 'kline'
                     elif event.find('24hrTicker') >= 0:
                         event = 'ticker'
@@ -1482,11 +1482,12 @@ class binance (Exchange):
             parameters = self.extend({
                 'event': element['event'],
                 'symbol': self._websocket_market_id(element['symbol']),
-                'interval': self.safe_string(params, 'timeframe'),
+                'interval': self.safe_string(params, 'timeframe', '1m'),
             }, params)
             streamGenerator = self.wsconf['events'][element['event']]['conx-param']['stream']
             streamList.append(self.implode_params(streamGenerator, parameters))
         stream = '/'.join(streamList)
+        console.log(options['url'] + stream)
         return options['url'] + stream
 
     def _websocket_market_id(self, symbol):
