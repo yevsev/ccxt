@@ -178,7 +178,16 @@ class binance (Exchange):
                         'conx-param': {
                             'url': '{baseurl}',
                             'id': '{id}',
-                            'stream': '{symbol}@depth',
+                            'stream': '{symbol}@depth@{obinterval}',
+                            'stream2': '{symbol}@depth{obdepth}@{obinterval}',
+                        },
+                    },
+                    'partob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                            'stream': '{symbol}@depth{obdepth}@{obinterval}',
                         },
                     },
                     'aggtrade': {
@@ -1292,10 +1301,13 @@ class binance (Exchange):
         resData = self.safe_value(msg, 'data', {})
         parts = stream.split('@')
         partsLen = len(parts)
-        if partsLen == 2:
+        if partsLen >= 2:
             msgType = parts[1]
             if msgType == 'depth':
                 self._websocket_handle_ob(contextId, resData)
+            elif msgType.find('depth') >= 0:
+                symbol = self.find_symbol(parts[0])
+                self._websocket_handle_partial_ob(contextId, symbol, resData)
             elif msgType == 'trade':
                 self._websocket_handle_trade(contextId, resData)
             elif msgType == 'aggTrade':
@@ -1344,6 +1356,11 @@ class binance (Exchange):
             else:
                 self.emit('ob', symbol, self._cloneOrderBook(symbolData['ob']))
             self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
+
+    def _websocket_handle_partial_ob(self, contextId, symbol, data):
+        orderbook = self.parse_order_book(data)
+        orderbook['nonce'] = self.safe_integer(data, 'lastUpdateId')
+        self.emit('partob', symbol, orderbook)
 
     def _websocket_handle_trade(self, contextId, data):
         symbol = self.find_symbol(self.safe_string(data, 's'))
@@ -1425,7 +1442,7 @@ class binance (Exchange):
             self._contextSetSymbolData(contextId, 'ob', symbol, data)
 
     def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
-        if event != 'ob' and event != 'trade' and event != 'ohlcv' and event != 'ticker':
+        if event != 'ob' and event != 'trade' and event != 'ohlcv' and event != 'ticker' and event != 'partob':
             raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
         if event == 'ob':
             config = self._contextGet(contextId, 'config')
@@ -1443,7 +1460,7 @@ class binance (Exchange):
         self.emit(nonceStr, True)
 
     def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
-        if event != 'ob' and event != 'trade':
+        if event != 'ob' and event != 'trade' and event != 'ohlcv' and event != 'ticker' and event != 'partob':
             raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
         nonceStr = str(nonce)
         self.emit(nonceStr, True)
@@ -1459,11 +1476,13 @@ class binance (Exchange):
                 stream = streams[i]
                 pair = stream.split('@')
                 partsLen = len(pair)
-                if partsLen == 2:
+                if partsLen >= 2:
                     # symbol = self.find_symbol(pair[0].upper())
                     event = pair[1].lower()
                     if event == 'depth':
                         event = 'ob'
+                    elif event.find('depth') >= 0:
+                        event = 'partob'
                     elif event == 'trade':
                         event = 'trade'
                     elif event == 'aggtrade':
@@ -1483,11 +1502,13 @@ class binance (Exchange):
                 'event': element['event'],
                 'symbol': self._websocket_market_id(element['symbol']),
                 'interval': self.safe_string(params, 'timeframe', '1m'),
+                'obdepth': self.safe_string(params, 'obdepth', '20'),
+                'obinterval': self.safe_string(params, 'obinterval', '1000ms'),
             }, params)
             streamGenerator = self.wsconf['events'][element['event']]['conx-param']['stream']
             streamList.append(self.implode_params(streamGenerator, parameters))
         stream = '/'.join(streamList)
-        console.log(options['url'] + stream)
+        # console.log(options['url'] + stream)
         return options['url'] + stream
 
     def _websocket_market_id(self, symbol):

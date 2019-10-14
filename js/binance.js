@@ -165,7 +165,16 @@ module.exports = class binance extends Exchange {
                         'conx-param': {
                             'url': '{baseurl}',
                             'id': '{id}',
-                            'stream': '{symbol}@depth',
+                            'stream': '{symbol}@depth@{obinterval}',
+                            'stream2': '{symbol}@depth{obdepth}@{obinterval}',
+                        },
+                    },
+                    'partob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                            'stream': '{symbol}@depth{obdepth}@{obinterval}',
                         },
                     },
                     'aggtrade': {
@@ -1414,10 +1423,13 @@ module.exports = class binance extends Exchange {
         const resData = this.safeValue (msg, 'data', {});
         const parts = stream.split ('@');
         const partsLen = parts.length;
-        if (partsLen === 2) {
+        if (partsLen >= 2) {
             const msgType = parts[1];
             if (msgType === 'depth') {
                 this._websocketHandleOb (contextId, resData);
+            } else if (msgType.indexOf ('depth') >= 0) {
+                const symbol = this.findSymbol (parts[0]);
+                this._websocketHandlePartialOb (contextId, symbol, resData);
             } else if (msgType === 'trade') {
                 this._websocketHandleTrade (contextId, resData);
             } else if (msgType === 'aggTrade') {
@@ -1476,6 +1488,12 @@ module.exports = class binance extends Exchange {
             }
             this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
         }
+    }
+
+    _websocketHandlePartialOb (contextId, symbol, data) {
+        const orderbook = this.parseOrderBook (data);
+        orderbook['nonce'] = this.safeInteger (data, 'lastUpdateId');
+        this.emit ('partob', symbol, orderbook);
     }
 
     _websocketHandleTrade (contextId, data) {
@@ -1568,7 +1586,7 @@ module.exports = class binance extends Exchange {
     }
 
     _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
-        if (event !== 'ob' && event !== 'trade' && event !== 'ohlcv' && event !== 'ticker') {
+        if (event !== 'ob' && event !== 'trade' && event !== 'ohlcv' && event !== 'ticker' && event !== 'partob') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         if (event === 'ob') {
@@ -1590,7 +1608,7 @@ module.exports = class binance extends Exchange {
     }
 
     _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
-        if (event !== 'ob' && event !== 'trade') {
+        if (event !== 'ob' && event !== 'trade' && event !== 'ohlcv' && event !== 'ticker' && event !== 'partob') {
             throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         const nonceStr = nonce.toString ();
@@ -1608,11 +1626,13 @@ module.exports = class binance extends Exchange {
                 const stream = streams[i];
                 const pair = stream.split ('@');
                 partsLen = pair.length;
-                if (partsLen === 2) {
+                if (partsLen >= 2) {
                     // let symbol = this.findSymbol (pair[0].toUpperCase ());
                     let event = pair[1].toLowerCase ();
                     if (event === 'depth') {
                         event = 'ob';
+                    } else if (event.indexOf ('depth') >= 0) {
+                        event = 'partob';
                     } else if (event === 'trade') {
                         event = 'trade';
                     } else if (event === 'aggtrade') {
@@ -1637,12 +1657,14 @@ module.exports = class binance extends Exchange {
                 'event': element['event'],
                 'symbol': this._websocketMarketId (element['symbol']),
                 'interval': this.safeString (params, 'timeframe', '1m'),
+                'obdepth': this.safeString (params, 'obdepth', '20'),
+                'obinterval': this.safeString (params, 'obinterval', '1000ms'),
             }, params);
             const streamGenerator = this.wsconf['events'][element['event']]['conx-param']['stream'];
             streamList.push (this.implodeParams (streamGenerator, parameters));
         }
         const stream = streamList.join ('/');
-        console.log(options['url'] + stream)
+        // console.log(options['url'] + stream)
         return options['url'] + stream;
     }
 

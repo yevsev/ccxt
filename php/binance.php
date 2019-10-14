@@ -165,7 +165,16 @@ class binance extends Exchange {
                         'conx-param' => array (
                             'url' => '{baseurl}',
                             'id' => '{id}',
-                            'stream' => '{symbol}@depth',
+                            'stream' => '{symbol}@depth@{obinterval}',
+                            'stream2' => '{symbol}@depth{obdepth}@{obinterval}',
+                        ),
+                    ),
+                    'partob' => array (
+                        'conx-tpl' => 'default',
+                        'conx-param' => array (
+                            'url' => '{baseurl}',
+                            'id' => '{id}',
+                            'stream' => '{symbol}@depth{obdepth}@{obinterval}',
                         ),
                     ),
                     'aggtrade' => array (
@@ -1414,10 +1423,13 @@ class binance extends Exchange {
         $resData = $this->safe_value($msg, 'data', array());
         $parts = explode('@', $stream);
         $partsLen = is_array ($parts) ? count ($parts) : 0;
-        if ($partsLen === 2) {
+        if ($partsLen >= 2) {
             $msgType = $parts[1];
             if ($msgType === 'depth') {
                 $this->_websocket_handle_ob ($contextId, $resData);
+            } else if (mb_strpos($msgType, 'depth') !== false) {
+                $symbol = $this->find_symbol($parts[0]);
+                $this->_websocket_handle_partial_ob ($contextId, $symbol, $resData);
             } else if ($msgType === 'trade') {
                 $this->_websocket_handle_trade ($contextId, $resData);
             } else if ($msgType === 'aggTrade') {
@@ -1476,6 +1488,12 @@ class binance extends Exchange {
             }
             $this->_contextSetSymbolData ($contextId, 'ob', $symbol, $symbolData);
         }
+    }
+
+    public function _websocket_handle_partial_ob ($contextId, $symbol, $data) {
+        $orderbook = $this->parse_order_book($data);
+        $orderbook['nonce'] = $this->safe_integer($data, 'lastUpdateId');
+        $this->emit ('partob', $symbol, $orderbook);
     }
 
     public function _websocket_handle_trade ($contextId, $data) {
@@ -1568,7 +1586,7 @@ class binance extends Exchange {
     }
 
     public function _websocket_subscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
-        if ($event !== 'ob' && $event !== 'trade' && $event !== 'ohlcv' && $event !== 'ticker') {
+        if ($event !== 'ob' && $event !== 'trade' && $event !== 'ohlcv' && $event !== 'ticker' && $event !== 'partob') {
             throw new NotSupported('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
         }
         if ($event === 'ob') {
@@ -1590,7 +1608,7 @@ class binance extends Exchange {
     }
 
     public function _websocket_unsubscribe ($contextId, $event, $symbol, $nonce, $params = array ()) {
-        if ($event !== 'ob' && $event !== 'trade') {
+        if ($event !== 'ob' && $event !== 'trade' && $event !== 'ohlcv' && $event !== 'ticker' && $event !== 'partob') {
             throw new NotSupported('unsubscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
         }
         $nonceStr = (string) $nonce;
@@ -1608,11 +1626,13 @@ class binance extends Exchange {
                 $stream = $streams[$i];
                 $pair = explode('@', $stream);
                 $partsLen = is_array ($pair) ? count ($pair) : 0;
-                if ($partsLen === 2) {
+                if ($partsLen >= 2) {
                     // $symbol = $this->find_symbol(strtoupper($pair[0]));
                     $event = strtolower($pair[1]);
                     if ($event === 'depth') {
                         $event = 'ob';
+                    } else if (mb_strpos($event, 'depth') !== false) {
+                        $event = 'partob';
                     } else if ($event === 'trade') {
                         $event = 'trade';
                     } else if ($event === 'aggtrade') {
@@ -1637,12 +1657,14 @@ class binance extends Exchange {
                 'event' => $element['event'],
                 'symbol' => $this->_websocket_market_id ($element['symbol']),
                 'interval' => $this->safe_string($params, 'timeframe', '1m'),
+                'obdepth' => $this->safe_string($params, 'obdepth', '20'),
+                'obinterval' => $this->safe_string($params, 'obinterval', '1000ms'),
             ), $params);
             $streamGenerator = $this->wsconf['events'][$element['event']]['conx-param']['stream'];
             $streamList[] = $this->implode_params($streamGenerator, $parameters);
         }
         $stream = implode('/', $streamList);
-        var_dump($options['url'] . $stream)
+        // var_dump($options['url'] . $stream)
         return $options['url'] . $stream;
     }
 
