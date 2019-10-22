@@ -1709,7 +1709,7 @@ class kucoin extends Exchange {
         // $seqId = $this->safe_integer($msg['data'], 'sequence');
         // if (is_array($symbolData) && array_key_exists('trade_sequence_id', $symbolData)) {
         //    $lastSeqId = $symbolData['trade_sequence_id'];
-        //    $lastSeqId++;
+        //    $lastSeqId = $this->sum ($lastSeqId, 1);
         //    if ($lastSeqId !== $seqId) {
         //        $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $lastSeqId . '+1 !=' . (string) $seqId . ')'), $contextId);
         //        return;
@@ -1739,7 +1739,7 @@ class kucoin extends Exchange {
         $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
         if (is_array($symbolData) && array_key_exists('ob_sequence_id', $symbolData)) {
             $lastSeqId = $symbolData['ob_sequence_id'];
-            $lastSeqId++;
+            $lastSeqId = $this->sum ($lastSeqId, 1);
             if ($lastSeqId !== $seqIdStart) {
                 $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $lastSeqId . ' !=' . (string) $seqIdStart . ')'), $contextId);
                 return;
@@ -1763,7 +1763,8 @@ class kucoin extends Exchange {
             if (is_array($symbolData) && array_key_exists('deltas', $symbolData)) {
                 $deltas = $symbolData['deltas'];
             }
-            if ((strlen ($deltas) === 0) || (strlen ($deltas) > 100)) {
+            $deltasLength = is_array ($deltas) ? count ($deltas) : 0;
+            if (($deltasLength === 0) || ($deltasLength > 100)) {
                 $deltas = array();
                 $deltas[] = $msg;
                 $symbolData['deltas'] = $deltas;
@@ -1788,7 +1789,7 @@ class kucoin extends Exchange {
         // $seqId = $this->safe_integer($dataSeq, 'sequence');
         // if (is_array($symbolData) && array_key_exists('ticker_sequence_id', $symbolData)) {
         //    $lastSeqId = $symbolData['ticker_sequence_id'];
-        //    $lastSeqId++;
+        //    $lastSeqId = $this->sum ($lastSeqId, 1);
         //    if ($lastSeqId !== $seqId) {
         //        $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $lastSeqId . ' !=' . (string) $seqId . ' +1)'), $contextId);
         //        return;
@@ -1845,7 +1846,7 @@ class kucoin extends Exchange {
         $data = $delta['data'];
         $sequenceStart = $this->safe_integer($data, 'sequenceStart');
         $nextSequence = $lastSequence;
-        $nextSequence++;
+        $nextSequence = $this->sum ($nextSequence, 1);
         if ($checkLastSequence && ($nextSequence !== $sequenceStart)) {
             $this->emit ('err', new NetworkError ('sequence id error in exchange => ' . $this->id . ' (' . (string) $nextSequence . ' !=' . (string) $sequenceStart . ')'), $contextId);
             return;

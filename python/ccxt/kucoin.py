@@ -1593,7 +1593,7 @@ class kucoin (Exchange):
         # seqId = self.safe_integer(msg['data'], 'sequence')
         # if 'trade_sequence_id' in symbolData:
         #    lastSeqId = symbolData['trade_sequence_id']
-        #    lastSeqId++
+        #    lastSeqId = self.sum(lastSeqId, 1)
         #    if lastSeqId != seqId:
         #        self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(lastSeqId) + '+1 !=' + str(seqId) + ')'), contextId)
         #        return
@@ -1620,7 +1620,7 @@ class kucoin (Exchange):
         symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
         if 'ob_sequence_id' in symbolData:
             lastSeqId = symbolData['ob_sequence_id']
-            lastSeqId++
+            lastSeqId = self.sum(lastSeqId, 1)
             if lastSeqId != seqIdStart:
                 self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(lastSeqId) + ' !=' + str(seqIdStart) + ')'), contextId)
                 return
@@ -1641,7 +1641,8 @@ class kucoin (Exchange):
             deltas = []
             if 'deltas' in symbolData:
                 deltas = symbolData['deltas']
-            if len((deltas) == 0) or len((deltas) > 100):
+            deltasLength = len(deltas)
+            if (deltasLength == 0) or (deltasLength > 100):
                 deltas = []
                 deltas.append(msg)
                 symbolData['deltas'] = deltas
@@ -1663,7 +1664,7 @@ class kucoin (Exchange):
         # seqId = self.safe_integer(dataSeq, 'sequence')
         # if 'ticker_sequence_id' in symbolData:
         #    lastSeqId = symbolData['ticker_sequence_id']
-        #    lastSeqId++
+        #    lastSeqId = self.sum(lastSeqId, 1)
         #    if lastSeqId != seqId:
         #        self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(lastSeqId) + ' !=' + str(seqId) + ' +1)'), contextId)
         #        return
@@ -1713,7 +1714,7 @@ class kucoin (Exchange):
         data = delta['data']
         sequenceStart = self.safe_integer(data, 'sequenceStart')
         nextSequence = lastSequence
-        nextSequence++
+        nextSequence = self.sum(nextSequence, 1)
         if checkLastSequence and(nextSequence != sequenceStart):
             self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(nextSequence) + ' !=' + str(sequenceStart) + ')'), contextId)
             return

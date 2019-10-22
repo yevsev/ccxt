@@ -1367,7 +1367,7 @@ module.exports = class bitmex extends Exchange {
         if (typeof lastSeq === 'undefined') {
             lastSeq = 1;
         } else {
-            lastSeq++;
+            lastSeq = this.sum (lastSeq, 1);
         }
         const sequenceStr = '_' + lastSeq.toString ();
         console.log ('PING ' + lastSeq);

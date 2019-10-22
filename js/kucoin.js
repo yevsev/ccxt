@@ -1708,7 +1708,7 @@ module.exports = class kucoin extends Exchange {
         // const seqId = this.safeInteger (msg['data'], 'sequence');
         // if ('trade_sequence_id' in symbolData) {
         //    let lastSeqId = symbolData['trade_sequence_id'];
-        //    lastSeqId++;
+        //    lastSeqId = this.sum (lastSeqId, 1);
         //    if (lastSeqId !== seqId) {
         //        this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + lastSeqId.toString () + '+1 !=' + seqId.toString () + ')'), contextId);
         //        return;
@@ -1738,7 +1738,7 @@ module.exports = class kucoin extends Exchange {
         const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         if ('ob_sequence_id' in symbolData) {
             let lastSeqId = symbolData['ob_sequence_id'];
-            lastSeqId++;
+            lastSeqId = this.sum (lastSeqId, 1);
             if (lastSeqId !== seqIdStart) {
                 this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + lastSeqId.toString () + ' !=' + seqIdStart.toString () + ')'), contextId);
                 return;
@@ -1762,7 +1762,8 @@ module.exports = class kucoin extends Exchange {
             if ('deltas' in symbolData) {
                 deltas = symbolData['deltas'];
             }
-            if ((deltas.length === 0) || (deltas.length > 100)) {
+            const deltasLength = deltas.length;
+            if ((deltasLength === 0) || (deltasLength > 100)) {
                 deltas = [];
                 deltas.push (msg);
                 symbolData['deltas'] = deltas;
@@ -1787,7 +1788,7 @@ module.exports = class kucoin extends Exchange {
         // const seqId = this.safeInteger (dataSeq, 'sequence');
         // if ('ticker_sequence_id' in symbolData) {
         //    let lastSeqId = symbolData['ticker_sequence_id'];
-        //    lastSeqId++;
+        //    lastSeqId = this.sum (lastSeqId, 1);
         //    if (lastSeqId !== seqId) {
         //        this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + lastSeqId.toString () + ' !=' + seqId.toString () + ' +1)'), contextId);
         //        return;
@@ -1844,7 +1845,7 @@ module.exports = class kucoin extends Exchange {
         const data = delta['data'];
         const sequenceStart = this.safeInteger (data, 'sequenceStart');
         let nextSequence = lastSequence;
-        nextSequence++;
+        nextSequence = this.sum (nextSequence, 1);
         if (checkLastSequence && (nextSequence !== sequenceStart)) {
             this.emit ('err', new NetworkError ('sequence id error in exchange: ' + this.id + ' (' + nextSequence.toString () + ' !=' + sequenceStart.toString () + ')'), contextId);
             return;

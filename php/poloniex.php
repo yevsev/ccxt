@@ -1417,6 +1417,7 @@ class poloniex extends Exchange {
             $this->_websocket_handle_orders ($contextId, $msg);
         } else if ($channelIdStr === '1010') {
             // Hearthbeat
+            return;
         } else {
             // Some error occured
             $this->emit ('err', new ExchangeError ($this->id . '._websocketOnMessage() failed to get $symbol for $channelId => ' . $channelIdStr));
@@ -1460,6 +1461,7 @@ class poloniex extends Exchange {
             $msg = $datareceived[$i];
             if ($msg[0] === 'b') {
                 // Balance Update ==> Not use at the moment
+                $l = 1;
             } else if ($msg[0] === 'n') {
                 // New Order : ["n", <currency pair id>, <t $order number>, <$order type>, "{rate}", "{amount}", "{date}"]
                 $side = ($msg[3] === 1) ? 'buy' : 'sell';

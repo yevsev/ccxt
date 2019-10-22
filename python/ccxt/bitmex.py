@@ -1265,7 +1265,7 @@ class bitmex (Exchange):
         if lastSeq is None:
             lastSeq = 1
         else:
-            lastSeq++
+            lastSeq = self.sum(lastSeq, 1)
         sequenceStr = '_' + str(lastSeq)
         print('PING ' + lastSeq)
         self._contextSet(contextId, 'pingseq', lastSeq)

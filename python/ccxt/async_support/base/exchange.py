@@ -1055,16 +1055,18 @@ class Exchange(BaseExchange, EventEmitter):
 
     def _awaitMethod (self, contextId, method, params, callbackMethod, callbackParams, this_param = None):
         this_param = this_param if (this_param is not None) else self
-        try:
-            response = await getattr(this_param, method)(*params)
+        async def await_get_attr ():
             try:
-                callbackParams.insert(0,response)
-                getattr(this_param, callbackMethod)(*callbackParams)
-            except Exception as ex2:
-                self.emit('err', ExchangeError(self.id + ': error invoking method ' + callbackMethod + ' ' + str(ex2)), contextId)
-        except Exception as ex:
-            self.emit('err', ExchangeError(self.id + ': error invoking method ' + method + ' ' + str(ex)), contextId)
-    }
+                response = await getattr(this_param, method)(*params)
+                try:
+                    callbackParams.insert(0,response)
+                    getattr(this_param, callbackMethod)(*callbackParams)
+                except Exception as ex2:
+                    self.emit('err', ExchangeError(self.id + ': error invoking method ' + callbackMethod + ' ' + str(ex2)), contextId)
+            except Exception as ex:
+                self.emit('err', ExchangeError(self.id + ': error invoking method ' + method + ' ' + str(ex)), contextId)
+
+        asyncio.ensure_future(await_get_attr(), loop=self.asyncio_loop)
 
     def _setTimeout(self, contextId, mseconds, method, params, this_param=None):
         this_param = this_param if (this_param is not None) else self

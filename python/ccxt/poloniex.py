@@ -1298,6 +1298,7 @@ class poloniex (Exchange):
             self._websocket_handle_orders(contextId, msg)
         elif channelIdStr == '1010':
             # Hearthbeat
+            return
         else:
             # Some error occured
             self.emit('err', ExchangeError(self.id + '._websocketOnMessage() failed to get symbol for channelId: ' + channelIdStr))
@@ -1336,6 +1337,7 @@ class poloniex (Exchange):
             msg = datareceived[i]
             if msg[0] == 'b':
                 # Balance Update ==> Not use at the moment
+                l = 1
             elif msg[0] == 'n':
                 # New Order : ["n", <currency pair id>, <t order number>, <order type>, "<rate>", "<amount>", "<date>"]
                 side = 'buy' if (msg[3] == 1) else 'sell'
