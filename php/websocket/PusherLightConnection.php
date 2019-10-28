@@ -29,9 +29,9 @@ class PusherWsEnvelop {
 
 class PusherLightConnection extends WebsocketBaseConnection {
 
-    public const CLIENT = 'ccxt-light-client';
-    public const VERSION = '1.0';
-    public const PROTOCOL = '7';
+    const CLIENT = 'ccxt-light-client';
+    const VERSION = '1.0';
+    const PROTOCOL = '7';
     public $options;
     private $timeout;
     private $loop;
