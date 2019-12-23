@@ -479,8 +479,8 @@ module.exports = class digifinex extends Exchange {
             'change': undefined,
             'percentage': percentage,
             'average': undefined,
-            'baseVolume': this.safeFloat (ticker, 'base_vol'),
-            'quoteVolume': this.safeFloat (ticker, 'vol'),
+            'baseVolume': this.safeFloat (ticker, 'vol'),
+            'quoteVolume': this.safeFloat (ticker, 'base_vol'),
             'info': ticker,
         };
     }
@@ -514,7 +514,7 @@ module.exports = class digifinex extends Exchange {
         //
         const id = this.safeString (trade, 'id');
         const orderId = this.safeString (trade, 'order_id');
-        const timestamp = this.safeTimestamp (trade, 'date', 'timestamp');
+        const timestamp = this.safeTimestamp2 (trade, 'date', 'timestamp');
         const side = this.safeString2 (trade, 'type', 'side');
         const price = this.safeFloat (trade, 'price');
         const amount = this.safeFloat (trade, 'amount');
@@ -944,6 +944,10 @@ module.exports = class digifinex extends Exchange {
         const orderType = this.safeString (params, 'type', defaultType);
         params = this.omit (params, 'type');
         await this.loadMarkets ();
+        let market = undefined;
+        if (symbol !== undefined) {
+            market = this.market (symbol);
+        }
         const request = {
             'market': orderType,
             'order_id': id,
@@ -970,7 +974,8 @@ module.exports = class digifinex extends Exchange {
         //         ]
         //     }
         //
-        return this.parseOrder (response);
+        const data = this.safeValue (response, 'data', {});
+        return this.parseOrder (data, market);
     }
 
     async fetchMyTrades (symbol = undefined, since = undefined, limit = undefined, params = {}) {

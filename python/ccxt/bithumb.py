@@ -14,7 +14,7 @@ from ccxt.base.errors import InvalidAddress
 from ccxt.base.errors import ExchangeNotAvailable
 
 
-class bithumb (Exchange):
+class bithumb(Exchange):
 
     def describe(self):
         return self.deep_extend(super(bithumb, self).describe(), {
@@ -35,6 +35,7 @@ class bithumb (Exchange):
                 },
                 'www': 'https://www.bithumb.com',
                 'doc': 'https://apidocs.bithumb.com',
+                'fees': 'https://en.bithumb.com/customer_support/info_fee',
             },
             'api': {
                 'public': {
@@ -68,8 +69,8 @@ class bithumb (Exchange):
             },
             'fees': {
                 'trading': {
-                    'maker': 0.15 / 100,
-                    'taker': 0.15 / 100,
+                    'maker': 0.25 / 100,
+                    'taker': 0.25 / 100,
                 },
             },
             'exceptions': {
@@ -179,16 +180,16 @@ class bithumb (Exchange):
         change = None
         percentage = None
         average = None
-        if (close is not None) and(open is not None):
+        if (close is not None) and (open is not None):
             change = close - open
             if open > 0:
                 percentage = change / open * 100
             average = self.sum(open, close) / 2
-        vwap = self.safe_float(ticker, 'average_price')
-        baseVolume = self.safe_float(ticker, 'volume_1day')
-        quoteVolume = None
-        if vwap is not None and baseVolume is not None:
-            quoteVolume = baseVolume * vwap
+        baseVolume = self.safe_float(ticker, 'units_traded_24H')
+        quoteVolume = self.safe_float(ticker, 'acc_trade_value_24H')
+        vwap = None
+        if quoteVolume is not None and baseVolume is not None:
+            vwap = quoteVolume / baseVolume
         return {
             'symbol': symbol,
             'timestamp': timestamp,
@@ -250,7 +251,7 @@ class bithumb (Exchange):
         if len(transaction_time) < 8:
             transaction_time = '0' + transaction_time
         timestamp = self.parse8601(transaction_date + ' ' + transaction_time)
-        timestamp -= 9 * 3600000  # they report UTC + 9 hours(server in list(Korean timezone.keys()))
+        timestamp -= 9 * 3600000  # they report UTC + 9 hours(server in Korean timezone)
         type = None
         side = self.safe_string(trade, 'type')
         side = 'sell' if (side == 'ask') else 'buy'
@@ -319,7 +320,7 @@ class bithumb (Exchange):
         }
 
     def cancel_order(self, id, symbol=None, params={}):
-        side_in_params = ('side' in list(params.keys()))
+        side_in_params = ('side' in params)
         if not side_in_params:
             raise ExchangeError(self.id + ' cancelOrder requires a `side` parameter(sell or buy) and a `currency` parameter')
         currency = self.safe_string(params, 'currency')
@@ -345,7 +346,7 @@ class bithumb (Exchange):
         }
         if currency == 'XRP' or currency == 'XMR':
             destination = self.safe_string(params, 'destination')
-            if (tag is None) and(destination is None):
+            if (tag is None) and (destination is None):
                 raise ExchangeError(self.id + ' ' + code + ' withdraw() requires a tag argument or an extra destination param')
             elif tag is not None:
                 request['destination'] = tag
@@ -395,14 +396,10 @@ class bithumb (Exchange):
             if status is not None:
                 if status == '0000':
                     return  # no error
-                feedback = self.id + ' ' + self.json(response)
-                exceptions = self.exceptions
-                if status in exceptions:
-                    raise exceptions[status](feedback)
-                elif message in exceptions:
-                    raise exceptions[message](feedback)
-                else:
-                    raise ExchangeError(feedback)
+                feedback = self.id + ' ' + body
+                self.throw_exactly_matched_exception(self.exceptions, status, feedback)
+                self.throw_exactly_matched_exception(self.exceptions, message, feedback)
+                raise ExchangeError(feedback)
 
     def request(self, path, api='public', method='GET', params={}, headers=None, body=None):
         response = self.fetch2(path, api, method, params, headers, body)

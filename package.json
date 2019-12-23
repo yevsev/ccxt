@@ -1,6 +1,6 @@
 {
   "name": "ccxt",
-  "version": "1.18.1115",
+  "version": "1.21.12",
   "description": "A JavaScript / Python / PHP cryptocurrency trading library with support for 130+ exchanges",
   "main": "./ccxt.js",
   "unpkg": "dist/ccxt.browser.js",
@@ -62,9 +62,7 @@
     "eslint": "^4.19.1",
     "eslint-config-airbnb-base": "12.1.0",
     "eslint-plugin-import": "2.16.0",
-    "istanbul": "0.4.5",
     "mocha": "5.2.0",
-    "nyc": "13.3.0",
     "ololog": "1.1.121"
   },
   "author": {
@@ -474,7 +472,27 @@
     "digifinex.vip",
     "DigiFinex",
     "idex.market",
-    "IDEX"
+    "IDEX",
+    "adara.io",
+    "Adara",
+    "binance.us",
+    "Binance US",
+    "whitebit.com",
+    "WhiteBit",
+    "bitmax.io",
+    "BitMax",
+    "bytetrade.com",
+    "ByteTrade",
+    "ftx.com",
+    "FTX",
+    "{hostname}",
+    "bw.com",
+    "stex.com",
+    "STEX",
+    "BW",
+    "timex.io",
+    "TimeX",
+    "bitz.com"
   ],
   "collective": {
     "type": "opencollective",

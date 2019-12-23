@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 const hitbtc = require ('./hitbtc');
-const { PermissionDenied, ExchangeError, ExchangeNotAvailable, OrderNotFound, InsufficientFunds, InvalidOrder, NotSupported } = require ('./base/errors');
+const { BadSymbol, PermissionDenied, ExchangeError, ExchangeNotAvailable, OrderNotFound, InsufficientFunds, InvalidOrder, NotSupported } = require ('./base/errors');
 const { TRUNCATE, DECIMAL_PLACES } = require ('./base/functions/number');
 // ---------------------------------------------------------------------------
 
@@ -545,6 +545,7 @@ module.exports = class hitbtc2 extends hitbtc {
             'exceptions': {
                 '1003': PermissionDenied, // "Action is forbidden for this API key"
                 '2010': InvalidOrder, // "Quantity not a valid number"
+                '2001': BadSymbol, // "Symbol not found"
                 '2011': InvalidOrder, // "Quantity too low"
                 '2020': InvalidOrder, // "Price not a valid number"
                 '20002': OrderNotFound, // canceling non-existent order
@@ -1226,7 +1227,11 @@ module.exports = class hitbtc2 extends hitbtc {
                     feeCost = 0;
                 }
                 tradesCost = this.sum (tradesCost, trades[i]['cost']);
-                feeCost = this.sum (feeCost, trades[i]['fee']['cost']);
+                const tradeFee = this.safeValue (trades[i], 'fee', {});
+                const tradeFeeCost = this.safeFloat (tradeFee, 'cost');
+                if (tradeFeeCost !== undefined) {
+                    feeCost = this.sum (feeCost, tradeFeeCost);
+                }
             }
             cost = tradesCost;
             if ((filled !== undefined) && (filled > 0)) {
@@ -1498,14 +1503,16 @@ module.exports = class hitbtc2 extends hitbtc {
             if ((code === 503) || (code === 504)) {
                 throw new ExchangeNotAvailable (feedback);
             }
+            // fallback to default error handler on rate limit errors
+            // {"code":429,"message":"Too many requests","description":"Too many requests"}
+            if (code === 429) {
+                return;
+            }
             // {"error":{"code":20002,"message":"Order not found","description":""}}
             if (body[0] === '{') {
                 if ('error' in response) {
-                    const code = this.safeString (response['error'], 'code');
-                    const exceptions = this.exceptions;
-                    if (code in exceptions) {
-                        throw new exceptions[code] (feedback);
-                    }
+                    const errorCode = this.safeString (response['error'], 'code');
+                    this.throwExactlyMatchedException (this.exceptions, errorCode, feedback);
                     const message = this.safeString (response['error'], 'message');
                     if (message === 'Duplicate clientOrderId') {
                         throw new InvalidOrder (feedback);

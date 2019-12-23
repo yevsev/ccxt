@@ -16,7 +16,7 @@ from ccxt.base.errors import InvalidNonce
 from ccxt.base.errors import RequestTimeout
 
 
-class cobinhood (Exchange):
+class cobinhood(Exchange):
 
     def describe(self):
         return self.deep_extend(super(cobinhood, self).describe(), {
@@ -697,7 +697,7 @@ class cobinhood (Exchange):
         #                                            created_at:  1536768050235,
         #                                              currency: "EOS",
         #                                                  memo: "12345678",
-        #                                                  type: "exchange"      }]} }
+        #                                                  type: "exchange"      }]}}
         #
         addresses = self.safe_value(response['result'], 'deposit_addresses', [])
         address = None
@@ -738,7 +738,7 @@ class cobinhood (Exchange):
             'currency': currency['id'],
         }
         response = self.privateGetWalletDeposits(self.extend(request, params))
-        return self.parseTransactions(response['result']['deposits'], currency)
+        return self.parse_transactions(response['result']['deposits'], currency)
 
     def fetch_withdrawals(self, code=None, since=None, limit=None, params={}):
         self.load_markets()
@@ -749,7 +749,7 @@ class cobinhood (Exchange):
             'currency': currency['id'],
         }
         response = self.privateGetWalletWithdrawals(self.extend(request, params))
-        return self.parseTransactions(response['result']['withdrawals'], currency)
+        return self.parse_transactions(response['result']['withdrawals'], currency)
 
     def parse_transaction_status(self, status):
         statuses = {
@@ -837,9 +837,7 @@ class cobinhood (Exchange):
                     # Cobinhood returns vague "parameter_error" on fetchOrder() and cancelOrder() calls
                     # for invalid order IDs as well as orders that are not "open"
                     raise InvalidOrder(feedback)
-        exceptions = self.exceptions
-        if errorCode in exceptions:
-            raise exceptions[errorCode](feedback)
+        self.throw_exactly_matched_exception(self.exceptions, errorCode, feedback)
         raise ExchangeError(feedback)
 
     def nonce(self):
@@ -853,13 +851,13 @@ class cobinhood (Exchange):
         version = h[1]
         type = h[2]
         if version != '2':
-            self.emit('err', ExchangeError(self.id + ' version response :' + version + ' != 2'), contextId)
+            self.emit('err', new ExchangeError(self.id + ' version response :' + version + ' != 2'), contextId)
             return
         parts = channel.split('.')
         id = parts[1]
-        symbol = self.find_symbol(id)
+        symbol = self.findSymbol(id)
         if type == 'error':
-            self.emit('err', ExchangeError(self.id + ' error ' + h[3] + ':' + h[4]))
+            self.emit('err', new ExchangeError(self.id + ' error ' + h[3] + ':' + h[4]))
         elif type == 'pong':
             pongTimeout = self._contextGet(contextId, 'pongtimeout')
             self._cancelTimeout(pongTimeout)
@@ -874,7 +872,7 @@ class cobinhood (Exchange):
             elif type == 'u':
                 self._websocket_handle_order_book_update(contextId, symbol, msg)
             else:
-                self.emit('err', ExchangeError(self.id + ' invalid orderbook message :' + type), contextId)
+                self.emit('err', new ExchangeError(self.id + ' invalid orderbook message :' + type), contextId)
         elif channel.find('ticker.') >= 0:
             if type == 'subscribed':
                 self._websocket_handle_subscription(contextId, 'ticker', msg, symbol)
@@ -886,7 +884,7 @@ class cobinhood (Exchange):
             elif type == 'u':
                 self._websocket_handle_ticker(contextId, symbol, msg)
             else:
-                self.emit('err', ExchangeError(self.id + ' invalid ticker message :' + type), contextId)
+                self.emit('err', new ExchangeError(self.id + ' invalid ticker message :' + type), contextId)
         elif channel.find('trade.') >= 0:
             if type == 'subscribed':
                 self._websocket_handle_subscription(contextId, 'trade', msg, symbol)
@@ -898,7 +896,7 @@ class cobinhood (Exchange):
             elif type == 'u':
                 self._websocket_handle_trade(contextId, symbol, msg)
             else:
-                self.emit('err', ExchangeError(self.id + ' invalid trade message :' + type), contextId)
+                self.emit('err', new ExchangeError(self.id + ' invalid trade message :' + type), contextId)
         elif channel.find('candle.') >= 0:
             if type == 'subscribed':
                 self._websocket_handle_subscription(contextId, 'ohlcv', msg, symbol)
@@ -910,7 +908,7 @@ class cobinhood (Exchange):
             elif type == 'u':
                 self._websocket_handle_ohlcv(contextId, symbol, msg)
             else:
-                self.emit('err', ExchangeError(self.id + ' invalid ohlcv message :' + type), contextId)
+                self.emit('err', new ExchangeError(self.id + ' invalid ohlcv message :' + type), contextId)
 
     def _websocket_on_open(self, contextId, params):
         heartbeatTimer = self._contextGet(contextId, 'heartbeattimer')
@@ -1065,11 +1063,11 @@ class cobinhood (Exchange):
         self._websocket_process_pending_nonces(contextId, 'unsub-nonces', event, symbol, True, None)
 
     def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
-        if (event != 'ob') and(event != 'ticker') and(event != 'trade') and(event != 'ohlcv'):
+        if (event != 'ob') and (event != 'ticker') and (event != 'trade') and (event != 'ohlcv'):
             raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
         # save nonce for subscription response
         symbolData = self._contextGetSymbolData(contextId, event, symbol)
-        if not('sub-nonces' in list(symbolData.keys())):
+        if not ('sub-nonces' in symbolData):
             symbolData['sub-nonces'] = {}
         id = self.market_id(symbol)
         payload = {
@@ -1097,10 +1095,10 @@ class cobinhood (Exchange):
         self.websocketSendJson(payload)
 
     def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
-        if (event != 'ob') and(event != 'ticker') and(event != 'trade') and(event != 'ohlcv'):
+        if (event != 'ob') and (event != 'ticker') and (event != 'trade') and (event != 'ohlcv'):
             raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
         symbolData = self._contextGetSymbolData(contextId, event, symbol)
-        if not('unsub-nonces' in list(symbolData.keys())):
+        if not ('unsub-nonces' in symbolData):
             symbolData['unsub-nonces'] = {}
         nonceStr = str(nonce)
         handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces'])
@@ -1132,6 +1130,6 @@ class cobinhood (Exchange):
 
     def _get_current_websocket_orderbook(self, contextId, symbol, limit):
         data = self._contextGetSymbolData(contextId, 'ob', symbol)
-        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+        if ('ob' in data) and (data['ob'] is not None):
             return self._cloneOrderBook(data['ob'], limit)
         return None

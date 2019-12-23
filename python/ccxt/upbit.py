@@ -16,7 +16,7 @@ from ccxt.base.errors import OrderNotFound
 from ccxt.base.errors import NotSupported
 
 
-class upbit (Exchange):
+class upbit(Exchange):
 
     def describe(self):
         return self.deep_extend(super(upbit, self).describe(), {
@@ -57,9 +57,10 @@ class upbit (Exchange):
                 '1w': 'weeks',
                 '1M': 'months',
             },
+            'hostname': 'api.upbit.com',
             'urls': {
                 'logo': 'https://user-images.githubusercontent.com/1294454/49245610-eeaabe00-f423-11e8-9cba-4b0aed794799.jpg',
-                'api': 'https://api.upbit.com',
+                'api': 'https://{hostname}',
                 'www': 'https://upbit.com',
                 'doc': 'https://docs.upbit.com/docs/%EC%9A%94%EC%B2%AD-%EC%88%98-%EC%A0%9C%ED%95%9C',
                 'fees': 'https://upbit.com/service_center/guide',
@@ -127,7 +128,8 @@ class upbit (Exchange):
             },
             'exceptions': {
                 'exact': {
-                    'Missing request parameter error. Check the required parametersnot ': BadRequest,
+                    'This key has expired.': AuthenticationError,
+                    'Missing request parameter error. Check the required parameters!': BadRequest,
                     'side is missing, side does not have a valid value': InvalidOrder,
                 },
                 'broad': {
@@ -849,7 +851,7 @@ class upbit (Exchange):
         elif side == 'sell':
             orderSide = 'ask'
         else:
-            raise InvalidOrder(self.id + ' createOrder allows buy or sell side onlynot ')
+            raise InvalidOrder(self.id + ' createOrder allows buy or sell side only!')
         self.load_markets()
         market = self.market(symbol)
         request = {
@@ -946,7 +948,7 @@ class upbit (Exchange):
         #         ...,
         #     ]
         #
-        return self.parseTransactions(response, currency, since, limit)
+        return self.parse_transactions(response, currency, since, limit)
 
     def fetch_withdrawals(self, code=None, since=None, limit=None, params={}):
         self.load_markets()
@@ -977,7 +979,7 @@ class upbit (Exchange):
         #         ...,
         #     ]
         #
-        return self.parseTransactions(response, currency, since, limit)
+        return self.parse_transactions(response, currency, since, limit)
 
     def parse_transaction_status(self, status):
         statuses = {
@@ -1421,9 +1423,12 @@ class upbit (Exchange):
         return self.milliseconds()
 
     def sign(self, path, api='public', method='GET', params={}, headers=None, body=None):
-        url = self.urls['api'] + '/' + self.version + '/' + self.implode_params(path, params)
+        url = self.implode_params(self.urls['api'], {
+            'hostname': self.hostname,
+        })
+        url += '/' + self.version + '/' + self.implode_params(path, params)
         query = self.omit(params, self.extract_params(path))
-        if method == 'GET':
+        if method != 'POST':
             if query:
                 url += '?' + self.urlencode(query)
         if api == 'private':
@@ -1434,12 +1439,15 @@ class upbit (Exchange):
                 'nonce': nonce,
             }
             if query:
-                request['query'] = self.urlencode(query)
+                auth = self.urlencode(query)
+                hash = self.hash(self.encode(auth), 'sha512')
+                request['query_hash'] = hash
+                request['query_hash_alg'] = 'SHA512'
             jwt = self.jwt(request, self.encode(self.secret))
             headers = {
                 'Authorization': 'Bearer ' + jwt,
             }
-            if method != 'GET':
+            if (method != 'GET') and (method != 'DELETE'):
                 body = self.json(params)
                 headers['Content-Type'] = 'application/json'
         return {'url': url, 'method': method, 'body': body, 'headers': headers}
@@ -1448,33 +1456,25 @@ class upbit (Exchange):
         if response is None:
             return  # fallback to default error handler
         #
-        #   {'error': {'message': "Missing request parameter error. Check the required parametersnot ", 'name':  400} },
-        #   {'error': {'message': "side is missing, side does not have a valid value", 'name': "validation_error"} },
-        #   {'error': {'message': "개인정보 제 3자 제공 동의가 필요합니다.", 'name': "thirdparty_agreement_required"} },
-        #   {'error': {'message': "권한이 부족합니다.", 'name': "out_of_scope"} },
-        #   {'error': {'message': "주문을 찾지 못했습니다.", 'name': "order_not_found"} },
-        #   {'error': {'message': "주문가능한 금액(ETH)이 부족합니다.", 'name': "insufficient_funds_ask"} },
-        #   {'error': {'message': "주문가능한 금액(BTC)이 부족합니다.", 'name': "insufficient_funds_bid"} },
-        #   {'error': {'message': "잘못된 엑세스 키입니다.", 'name': "invalid_access_key"} },
-        #   {'error': {'message': "Jwt 토큰 검증에 실패했습니다.", 'name': "jwt_verification"} }
+        #   {'error': {'message': "Missing request parameter error. Check the required parameters!", 'name':  400}},
+        #   {'error': {'message': "side is missing, side does not have a valid value", 'name': "validation_error"}},
+        #   {'error': {'message': "개인정보 제 3자 제공 동의가 필요합니다.", 'name': "thirdparty_agreement_required"}},
+        #   {'error': {'message': "권한이 부족합니다.", 'name': "out_of_scope"}},
+        #   {'error': {'message': "주문을 찾지 못했습니다.", 'name': "order_not_found"}},
+        #   {'error': {'message': "주문가능한 금액(ETH)이 부족합니다.", 'name': "insufficient_funds_ask"}},
+        #   {'error': {'message': "주문가능한 금액(BTC)이 부족합니다.", 'name': "insufficient_funds_bid"}},
+        #   {'error': {'message': "잘못된 엑세스 키입니다.", 'name': "invalid_access_key"}},
+        #   {'error': {'message': "Jwt 토큰 검증에 실패했습니다.", 'name': "jwt_verification"}}
         #
         error = self.safe_value(response, 'error')
         if error is not None:
             message = self.safe_string(error, 'message')
             name = self.safe_string(error, 'name')
-            feedback = self.id + ' ' + self.json(response)
-            exact = self.exceptions['exact']
-            if message in exact:
-                raise exact[message](feedback)
-            if name in exact:
-                raise exact[name](feedback)
-            broad = self.exceptions['broad']
-            broadKey = self.findBroadlyMatchedKey(broad, message)
-            if broadKey is not None:
-                raise broad[broadKey](feedback)
-            broadKey = self.findBroadlyMatchedKey(broad, name)
-            if broadKey is not None:
-                raise broad[broadKey](feedback)
+            feedback = self.id + ' ' + body
+            self.throw_exactly_matched_exception(self.exceptions['exact'], message, feedback)
+            self.throw_exactly_matched_exception(self.exceptions['exact'], name, feedback)
+            self.throw_broadly_matched_exception(self.exceptions['broad'], message, feedback)
+            self.throw_broadly_matched_exception(self.exceptions['broad'], name, feedback)
             raise ExchangeError(feedback)  # unknown message
 
     def _websocket_on_message(self, contextId, data):
@@ -1486,7 +1486,7 @@ class upbit (Exchange):
         id = code.replace('CRIX.UPBIT.', '')
         type = type.replace('crix', '')
         type = type.lower()
-        symbol = self.find_symbol(id)
+        symbol = self.findSymbol(id)
         if type == 'orderbook':
             self._websocket_handle_order_book(contextId, symbol, msg)
         elif type == 'trade':
@@ -1598,7 +1598,7 @@ class upbit (Exchange):
             subscribedEvent = subscribedEvents[i]
             event = subscribedEvent['event']
             symbol = subscribedEvent['symbol']
-            if subscribe or (event != sEvent) and(symbol != sSymbol):
+            if subscribe or (event != sEvent) and (symbol != sSymbol):
                 # id = 'CRIX.UPBIT.' + self.market_id(symbol)
                 id = self.market_id(symbol)
                 if event in eventCodes:
@@ -1626,7 +1626,7 @@ class upbit (Exchange):
         return ticket
 
     def _websocket_subscribe(self, contextId, event, symbol, nonce, params={}):
-        if (event != 'ob') and(event != 'ticker') and(event != 'trade'):
+        if (event != 'ob') and (event != 'ticker') and (event != 'trade'):
             raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
         # save nonce for subscription response
         symbolData = self._contextGetSymbolData(contextId, event, symbol)
@@ -1640,7 +1640,7 @@ class upbit (Exchange):
         self.emit(nonceStr, True)
 
     def _websocket_unsubscribe(self, contextId, event, symbol, nonce, params={}):
-        if (event != 'ob') and(event != 'ticker') and(event != 'trade'):
+        if (event != 'ob') and (event != 'ticker') and (event != 'trade'):
             raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
         payload = self._websocket_generate_ticket(contextId, event, symbol, False)
         nonceStr = str(nonce)
@@ -1649,6 +1649,6 @@ class upbit (Exchange):
 
     def _get_current_websocket_orderbook(self, contextId, symbol, limit):
         data = self._contextGetSymbolData(contextId, 'ob', symbol)
-        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+        if ('ob' in data) and (data['ob'] is not None):
             return self._cloneOrderBook(data['ob'], limit)
         return None

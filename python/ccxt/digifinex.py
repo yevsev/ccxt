@@ -19,7 +19,7 @@ from ccxt.base.errors import DDoSProtection
 from ccxt.base.errors import InvalidNonce
 
 
-class digifinex (Exchange):
+class digifinex(Exchange):
 
     def describe(self):
         return self.deep_extend(super(digifinex, self).describe(), {
@@ -476,8 +476,8 @@ class digifinex (Exchange):
             'change': None,
             'percentage': percentage,
             'average': None,
-            'baseVolume': self.safe_float(ticker, 'base_vol'),
-            'quoteVolume': self.safe_float(ticker, 'vol'),
+            'baseVolume': self.safe_float(ticker, 'vol'),
+            'quoteVolume': self.safe_float(ticker, 'base_vol'),
             'info': ticker,
         }
 
@@ -510,7 +510,7 @@ class digifinex (Exchange):
         #
         id = self.safe_string(trade, 'id')
         orderId = self.safe_string(trade, 'order_id')
-        timestamp = self.safe_timestamp(trade, 'date', 'timestamp')
+        timestamp = self.safe_timestamp_2(trade, 'date', 'timestamp')
         side = self.safe_string_2(trade, 'type', 'side')
         price = self.safe_float(trade, 'price')
         amount = self.safe_float(trade, 'amount')
@@ -903,6 +903,9 @@ class digifinex (Exchange):
         orderType = self.safe_string(params, 'type', defaultType)
         params = self.omit(params, 'type')
         self.load_markets()
+        market = None
+        if symbol is not None:
+            market = self.market(symbol)
         request = {
             'market': orderType,
             'order_id': id,
@@ -929,7 +932,8 @@ class digifinex (Exchange):
         #         ]
         #     }
         #
-        return self.parse_order(response)
+        data = self.safe_value(response, 'data', {})
+        return self.parse_order(data, market)
 
     def fetch_my_trades(self, symbol=None, since=None, limit=None, params={}):
         defaultType = self.safe_string(self.options, 'defaultType', 'spot')

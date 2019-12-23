@@ -7,7 +7,7 @@ from ccxt.async_support.huobipro import huobipro
 from ccxt.base.errors import PermissionDenied
 
 
-class hadax (huobipro):
+class hadax(huobipro):
 
     def describe(self):
         return self.deep_extend(super(hadax, self).describe(), {

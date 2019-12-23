@@ -4,13 +4,6 @@
 # https://github.com/ccxt/ccxt/blob/master/CONTRIBUTING.md#how-to-contribute-code
 
 from ccxt.base.exchange import Exchange
-
-# -----------------------------------------------------------------------------
-
-try:
-    basestring  # Python 3
-except NameError:
-    basestring = str  # Python 2
 import hashlib
 import math
 import json
@@ -18,12 +11,13 @@ from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import ArgumentsRequired
 from ccxt.base.errors import InsufficientFunds
 from ccxt.base.errors import InvalidAddress
+from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import OrderNotFound
 from ccxt.base.errors import NotSupported
 from ccxt.base.errors import DDoSProtection
 
 
-class gateio (Exchange):
+class gateio(Exchange):
 
     def describe(self):
         return self.deep_extend(super(gateio, self).describe(), {
@@ -143,6 +137,7 @@ class gateio (Exchange):
                 '15': DDoSProtection,
                 '16': OrderNotFound,
                 '17': OrderNotFound,
+                '20': InvalidOrder,
                 '21': InsufficientFunds,
             },
             # https://gate.io/api2#errCode
@@ -322,7 +317,7 @@ class gateio (Exchange):
         open = None
         change = None
         average = None
-        if (last is not None) and(percentage is not None):
+        if (last is not None) and (percentage is not None):
             relativeChange = percentage / 100
             open = last / self.sum(1, relativeChange)
             change = last - open
@@ -349,24 +344,6 @@ class gateio (Exchange):
             'quoteVolume': self.safe_float(ticker, 'baseVolume'),
             'info': ticker,
         }
-
-    def handle_errors(self, code, reason, url, method, headers, body, response, requestHeaders, requestBody):
-        if response is None:
-            return
-        resultString = self.safe_string(response, 'result', '')
-        if resultString != 'false':
-            return
-        errorCode = self.safe_string(response, 'code')
-        if errorCode is not None:
-            exceptions = self.exceptions
-            errorCodeNames = self.errorCodeNames
-            if errorCode in exceptions:
-                message = ''
-                if errorCode in errorCodeNames:
-                    message = errorCodeNames[errorCode]
-                else:
-                    message = self.safe_string(response, 'message', '(unknown)')
-                raise exceptions[errorCode](message)
 
     def fetch_tickers(self, symbols=None, params={}):
         self.load_markets()
@@ -488,7 +465,8 @@ class gateio (Exchange):
         timestamp = self.safe_timestamp(order, 'timestamp')
         status = self.parse_order_status(self.safe_string(order, 'status'))
         side = self.safe_string(order, 'type')
-        price = self.safe_float(order, 'filledRate')
+        price = self.safe_float(order, 'initialRate')
+        average = self.safe_float(order, 'filledRate')
         amount = self.safe_float(order, 'initialAmount')
         filled = self.safe_float(order, 'filledAmount')
         # In the order status response, self field has a different name.
@@ -512,6 +490,7 @@ class gateio (Exchange):
             'amount': amount,
             'filled': filled,
             'remaining': remaining,
+            'average': average,
             'trades': None,
             'fee': {
                 'cost': feeCost,
@@ -559,7 +538,7 @@ class gateio (Exchange):
         response = getattr(self, method)(self.extend(request, params))
         address = self.safe_string(response, 'addr')
         tag = None
-        if (address is not None) and(address.find('address') >= 0):
+        if (address is not None) and (address.find('address') >= 0):
             raise InvalidAddress(self.id + ' queryDepositAddress ' + address)
         if code == 'XRP':
             parts = address.split(' ')
@@ -662,7 +641,7 @@ class gateio (Exchange):
         currency = None
         if code is not None:
             currency = self.currency(code)
-        return self.parseTransactions(transactions, currency, since, limit)
+        return self.parse_transactions(transactions, currency, since, limit)
 
     def fetch_transactions(self, code=None, since=None, limit=None, params={}):
         return self.fetch_transactions_by_type(None, code, since, limit, params)
@@ -729,6 +708,7 @@ class gateio (Exchange):
         statuses = {
             'PEND': 'pending',
             'REQUEST': 'pending',
+            'DMOVE': 'pending',
             'CANCEL': 'failed',
             'DONE': 'ok',
         }
@@ -741,19 +721,17 @@ class gateio (Exchange):
         }
         return self.safe_string(types, type, type)
 
-    def request(self, path, api='public', method='GET', params={}, headers=None, body=None):
-        response = self.fetch2(path, api, method, params, headers, body)
-        if 'result' in response:
-            result = response['result']
-            message = self.id + ' ' + self.json(response)
-            if result is None:
-                raise ExchangeError(message)
-            if isinstance(result, basestring):
-                if result != 'true':
-                    raise ExchangeError(message)
-            elif not result:
-                raise ExchangeError(message)
-        return response
+    def handle_errors(self, code, reason, url, method, headers, body, response, requestHeaders, requestBody):
+        if response is None:
+            return
+        resultString = self.safe_string(response, 'result', '')
+        if resultString != 'false':
+            return
+        errorCode = self.safe_string(response, 'code')
+        message = self.safe_string(response, 'message', body)
+        if errorCode is not None:
+            feedback = self.safe_string(self.errorCodeNames, errorCode, message)
+            self.throw_exactly_matched_exception(self.exceptions['exact'], errorCode, feedback)
 
     def _websocket_on_message(self, contextId, data):
         msg = json.loads(data)
@@ -771,7 +749,7 @@ class gateio (Exchange):
         params = self.safe_value(msg, 'params')
         clean = params[0]
         ob = params[1]
-        symbol = self.find_symbol(params[2].lower())
+        symbol = self.findSymbol(params[2].lower())
         if clean:
             ob = self.parse_order_book(ob, None)
             data = self._contextGetSymbolData(contextId, 'ob', symbol)
@@ -812,6 +790,6 @@ class gateio (Exchange):
 
     def _get_current_websocket_orderbook(self, contextId, symbol, limit):
         data = self._contextGetSymbolData(contextId, 'ob', symbol)
-        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+        if ('ob' in data) and (data['ob'] is not None):
             return self._cloneOrderBook(data['ob'], limit)
         return None

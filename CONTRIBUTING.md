@@ -402,7 +402,7 @@ In JavaScript, dictionary keys can be accessed in two notations:
 
 Both work almost identically, and one is implicitly converted to another upon executing the JavaScript code.
 
-While the above does work in JavaScript, it will not work in Python or PHP. In most languages, associative dictionary keys are not treated in the same was as properties. Therefore, in Python `object.key` is not the same as `object['key']`. In PHP `$object->key` is not the same as `$object['key']` as well. Languages that differentiate between associative keys and properties use different notations for the two.
+While the above does work in JavaScript, it will not work in Python or PHP. In most languages, associative dictionary keys are not treated in the same way as properties. Therefore, in Python `object.key` is not the same as `object['key']`. In PHP `$object->key` is not the same as `$object['key']` as well. Languages that differentiate between associative keys and properties use different notations for the two.
 
 To keep the code transpileable, please, remeber this simple rule: *always use the single-quoted string key notation `object['key']` for accessing all associative dictionary keys in all languages everywhere throughout this library!*
 
@@ -443,6 +443,14 @@ if some_dictionary.get('nonExistentKey'):
 ```
 
 Most languages will not tolerate an attempt to access a non-existent key in an object.
+
+For the above reasons, please, **never do this** in the transpiled JS files:
+
+```JavaScript
+// JavaScript
+const value = object['key'] || other_value; // will not work in Python or PHP!
+if (object['key'] || other_value) { /* will not work in Python or PHP! */ }
+```
 
 Therefore we have a family of `safe*` functions:
 

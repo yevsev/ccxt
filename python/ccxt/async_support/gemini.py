@@ -4,6 +4,13 @@
 # https://github.com/ccxt/ccxt/blob/master/CONTRIBUTING.md#how-to-contribute-code
 
 from ccxt.async_support.base.exchange import Exchange
+
+# -----------------------------------------------------------------------------
+
+try:
+    basestring  # Python 3
+except NameError:
+    basestring = str  # Python 2
 import base64
 import hashlib
 import json
@@ -19,10 +26,11 @@ from ccxt.base.errors import NotSupported
 from ccxt.base.errors import NetworkError
 from ccxt.base.errors import DDoSProtection
 from ccxt.base.errors import ExchangeNotAvailable
+from ccxt.base.errors import OnMaintenance
 from ccxt.base.errors import InvalidNonce
 
 
-class gemini (Exchange):
+class gemini(Exchange):
 
     def describe(self):
         return self.deep_extend(super(gemini, self).describe(), {
@@ -95,6 +103,7 @@ class gemini (Exchange):
                         'v1/order/status',
                         'v1/orders',
                         'v1/mytrades',
+                        'v1/notionalvolume',
                         'v1/tradevolume',
                         'v1/transfers',
                         'v1/balances',
@@ -191,7 +200,9 @@ class gemini (Exchange):
                     'System': ExchangeError,  # We are experiencing technical issues
                     'UnsupportedOption': BadRequest,  # This order execution option is not supported.
                 },
-                'broad': {},
+                'broad': {
+                    'The Gemini Exchange is currently undergoing maintenance.': OnMaintenance,  # The Gemini Exchange is currently undergoing maintenance. Please check https://status.gemini.com/ for more information.
+                },
             },
             'options': {
                 'fetchMarketsMethod': 'fetch_markets_from_web',
@@ -567,7 +578,7 @@ class gemini (Exchange):
         if since is not None:
             request['timestamp'] = since
         response = await self.privatePostV1Transfers(self.extend(request, params))
-        return self.parseTransactions(response)
+        return self.parse_transactions(response)
 
     def parse_transaction(self, transaction, currency=None):
         timestamp = self.safe_integer(transaction, 'timestampms')
@@ -629,6 +640,9 @@ class gemini (Exchange):
 
     def handle_errors(self, httpCode, reason, url, method, headers, body, response, requestHeaders, requestBody):
         if response is None:
+            if isinstance(body, basestring):
+                feedback = self.id + ' ' + body
+                self.throw_broadly_matched_exception(self.exceptions['broad'], body, feedback)
             return  # fallback to default error handler
         #
         #     {
@@ -642,15 +656,9 @@ class gemini (Exchange):
             reason = self.safe_string(response, 'reason')
             message = self.safe_string(response, 'message')
             feedback = self.id + ' ' + message
-            exact = self.exceptions['exact']
-            if reason in exact:
-                raise exact[reason](feedback)
-            elif message in exact:
-                raise exact[message](feedback)
-            broad = self.exceptions['broad']
-            broadKey = self.findBroadlyMatchedKey(broad, message)
-            if broadKey is not None:
-                raise broad[broadKey](feedback)
+            self.throw_exactly_matched_exception(self.exceptions['exact'], reason, feedback)
+            self.throw_exactly_matched_exception(self.exceptions['exact'], message, feedback)
+            self.throw_broadly_matched_exception(self.exceptions['broad'], message, feedback)
             raise ExchangeError(feedback)  # unknown message
 
     async def fetch_ohlcv(self, symbol, timeframe='5m', since=None, limit=None, params={}):
@@ -708,7 +716,7 @@ class gemini (Exchange):
         if lastSeqId is not None:
             lastSeqId = lastSeqId + 1
             if lastSeqId != seqId:
-                self.emit('err', NetworkError('sequence id error in exchange: ' + self.id + '(' + str(lastSeqId) + '+1 !=' + str(seqId) + ')'), contextId)
+                self.emit('err', new NetworkError('sequence id error in exchange: ' + self.id + '(' + str(lastSeqId) + '+1 !=' + str(seqId) + ')'), contextId)
                 return
         self._contextSet(contextId, 'sequence_id', seqId)
         symbol = self._contextGet(contextId, 'symbol')
@@ -726,7 +734,7 @@ class gemini (Exchange):
                 eventsLength = len(events)
                 if eventsLength > 0:
                     event = events[0]
-                    if (event['type'] == 'change') and(self.safe_string(event, 'reason') == 'initial'):
+                    if (event['type'] == 'change') and (self.safe_string(event, 'reason') == 'initial'):
                         symbolData['ob'] = {
                             'bids': [],
                             'asks': [],
@@ -748,7 +756,7 @@ class gemini (Exchange):
                     size = self.safe_float(event, 'remaining')
                     keySide = 'bids' if (side == 'bid') else 'asks'
                     self.updateBidAsk([price, size], symbolData['ob'][keySide], side == 'bid')
-                elif eventType == 'trade' and('trade' in list(subscribedEvents.keys())):
+                elif eventType == 'trade' and ('trade' in subscribedEvents):
                     self._websocket_handle_trade(msg, event, symbol)
             if obEventActive:
                 self.emit('ob', symbol, self._cloneOrderBook(symbolData['ob'], symbolData['limit']))  # True even with 'trade', as a trade event has the corresponding ob change event in the same events list
@@ -781,7 +789,7 @@ class gemini (Exchange):
             parts = parts[0].split('/')
             partsLen = len(parts)
             symbol = parts[partsLen - 1]
-            symbol = self.find_symbol(symbol)
+            symbol = self.findSymbol(symbol)
             self._contextSet(contextId, 'symbol', symbol)
             params = params.split('&')
             for i in range(0, len(params)):
@@ -793,7 +801,7 @@ class gemini (Exchange):
                 #     if parts[0] == 'bids':
                 #         event = 'ob'
                 #     }
-                #     if (event is not None) and(parts[1] == 'true'):
+                #     if (event is not None) and (parts[1] == 'true'):
                 #         self._contextSetSubscribed(contextId, event, symbol, True)
                 #         self._contextSetSubscribing(contextId, event, symbol, False)
                 #     }
@@ -820,6 +828,6 @@ class gemini (Exchange):
 
     def _get_current_websocket_orderbook(self, contextId, symbol, limit):
         data = self._contextGetSymbolData(contextId, 'ob', symbol)
-        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+        if ('ob' in data) and (data['ob'] is not None):
             return self._cloneOrderBook(data['ob'], limit)
         return None

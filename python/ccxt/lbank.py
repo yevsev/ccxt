@@ -13,7 +13,7 @@ from ccxt.base.errors import NotSupported
 from ccxt.base.errors import DDoSProtection
 
 
-class lbank (Exchange):
+class lbank(Exchange):
 
     def describe(self):
         return self.deep_extend(super(lbank, self).describe(), {
@@ -48,7 +48,7 @@ class lbank (Exchange):
                 'api': 'https://api.lbank.info',
                 'www': 'https://www.lbank.info',
                 'doc': 'https://github.com/LBank-exchange/lbank-official-api-docs',
-                'fees': 'https://lbankinfo.zendesk.com/hc/zh-cn/articles/115002295114--%E8%B4%B9%E7%8E%87%E8%AF%B4%E6%98%8E',
+                'fees': 'https://lbankinfo.zendesk.com/hc/en-gb/articles/360012072873-Trading-Fees',
                 'referral': 'https://www.lbex.io/invite?icode=7QCY',
             },
             'api': {
@@ -638,7 +638,7 @@ class lbank (Exchange):
             if partsLen > 5:
                 if parts[5] == 'depth':
                     # orderbook
-                    symbol = self.find_symbol(parts[3] + '_' + parts[4])
+                    symbol = self.findSymbol(parts[3] + '_' + parts[4])
                     # try to match with subscription
                     found = False
                     data = self._contextGetSymbolData(contextId, 'ob', symbol)
@@ -668,10 +668,10 @@ class lbank (Exchange):
             partsLen = len(parts)
             if partsLen > 5:
                 if parts[5] == 'depth':
-                    symbol = self.find_symbol(parts[3] + '_' + parts[4])
+                    symbol = self.findSymbol(parts[3] + '_' + parts[4])
                     self._websocket_handle_ob(contextId, msg, symbol)
             else:
-                self.emit('err', ExchangeError(self.id + ' invalid channel ' + channel))
+                self.emit('err', new ExchangeError(self.id + ' invalid channel ' + channel))
 
     def _websocket_handle_ob(self, contextId, msg, symbol):
         ob = self.parse_order_book(msg)
@@ -690,7 +690,7 @@ class lbank (Exchange):
         }
         data = self._contextGetSymbolData(contextId, event, symbol)
         data['limit'] = self.safe_integer(params, 'limit', None)
-        if not('sub-nonces' in list(data.keys())):
+        if not ('sub-nonces' in data):
             data['sub-nonces'] = {}
         nonceStr = str(nonce)
         handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonces'])
@@ -708,7 +708,7 @@ class lbank (Exchange):
             'id': nonce,
         }
         data = self._contextGetSymbolData(contextId, event, symbol)
-        if not('unsub-nonces' in list(data.keys())):
+        if not ('unsub-nonces' in data):
             data['unsub-nonces'] = {}
         nonceStr = str(nonce)
         handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces'])
@@ -726,6 +726,6 @@ class lbank (Exchange):
 
     def _get_current_websocket_orderbook(self, contextId, symbol, limit):
         data = self._contextGetSymbolData(contextId, 'ob', symbol)
-        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+        if ('ob' in data) and (data['ob'] is not None):
             return self._cloneOrderBook(data['ob'], limit)
         return None

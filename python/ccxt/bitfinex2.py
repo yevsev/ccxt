@@ -12,7 +12,7 @@ from ccxt.base.errors import InsufficientFunds
 from ccxt.base.errors import NotSupported
 
 
-class bitfinex2 (bitfinex):
+class bitfinex2(bitfinex):
 
     def describe(self):
         return self.deep_extend(super(bitfinex2, self).describe(), {
@@ -32,7 +32,7 @@ class bitfinex2 (bitfinex):
                 'fetchDepositAddress': False,
                 'fetchClosedOrders': False,
                 'fetchFundingFees': False,
-                'fetchMyTrades': False,  # has to be False https://github.com/ccxt/ccxt/issues/4971
+                'fetchMyTrades': True,
                 'fetchOHLCV': True,
                 'fetchOpenOrders': False,
                 'fetchOrder': True,
@@ -112,10 +112,12 @@ class bitfinex2 (bitfinex):
                         'auth/r/orders/{symbol}/new',
                         'auth/r/orders/{symbol}/hist',
                         'auth/r/order/{symbol}:{id}/trades',
+                        'auth/w/order/submit',
                         'auth/r/trades/hist',
                         'auth/r/trades/{symbol}/hist',
                         'auth/r/positions',
                         'auth/r/positions/hist',
+                        'auth/r/positions/audit',
                         'auth/r/funding/offers/{symbol}',
                         'auth/r/funding/offers/{symbol}/hist',
                         'auth/r/funding/loans/{symbol}',
@@ -234,7 +236,7 @@ class bitfinex2 (bitfinex):
         })
 
     def is_fiat(self, code):
-        return(code in list(self.options['fiat'].keys()))
+        return(code in self.options['fiat'])
 
     def get_currency_id(self, code):
         return 'f' + code
@@ -468,7 +470,7 @@ class bitfinex2 (bitfinex):
                     symbol = market['symbol']
                 else:
                     symbol = marketId
-            orderId = trade[3]
+            orderId = str(trade[3])
             takerOrMaker = 'maker' if (trade[8] == 1) else 'taker'
             feeCost = trade[9]
             feeCurrency = self.safe_currency_code(trade[10])
@@ -564,8 +566,6 @@ class bitfinex2 (bitfinex):
         raise NotSupported(self.id + ' withdraw not implemented yet')
 
     def fetch_my_trades(self, symbol=None, since=None, limit=None, params={}):
-        # self.has['fetchMyTrades'] is set to False
-        # https://github.com/ccxt/ccxt/issues/4971
         self.load_markets()
         market = None
         request = {
@@ -581,25 +581,6 @@ class bitfinex2 (bitfinex):
             request['symbol'] = market['id']
             method = 'privatePostAuthRTradesSymbolHist'
         response = getattr(self, method)(self.extend(request, params))
-        #
-        #     [
-        #         [
-        #             ID,
-        #             PAIR,
-        #             MTS_CREATE,
-        #             ORDER_ID,
-        #             EXEC_AMOUNT,
-        #             EXEC_PRICE,
-        #             ORDER_TYPE,
-        #             ORDER_PRICE,
-        #             MAKER,
-        #             FEE,
-        #             FEE_CURRENCY,
-        #             ...
-        #         ],
-        #         ...
-        #     ]
-        #
         return self.parse_trades(response, market, since, limit)
 
     def nonce(self):
@@ -668,8 +649,8 @@ class bitfinex2 (bitfinex):
                 return
             chanKey = '_' + str(chanId)
             channels = self._contextGet(contextId, 'channels')
-            if not(chanKey in list(channels.keys())):
-                self.emit('err', ExchangeError(self.id + ' msg received from unregistered channels:' + chanId), contextId)
+            if not (chanKey in channels):
+                self.emit('err', new ExchangeError(self.id + ' msg received from unregistered channels:' + chanId), contextId)
                 return
             symbol = channels[chanKey]['symbol']
             event = channels[chanKey]['event']
@@ -694,11 +675,11 @@ class bitfinex2 (bitfinex):
         ex = ExchangeError(self.id + ' ' + errorCode + ':' + errorMsg)
         if channel == 'book':
             id = self.safe_string(msg, 'symbol')
-            symbol = self.find_symbol(id)
+            symbol = self.findSymbol(id)
             self._websocket_process_pending_nonces(contextId, 'sub-nonces', 'ob', symbol, False, ex)
         elif channel == 'trades':
             id = self.safe_string(msg, 'symbol')
-            symbol = self.find_symbol(id)
+            symbol = self.findSymbol(id)
             self._websocket_process_pending_nonces(contextId, 'sub-nonces', 'trade', symbol, False, ex)
         self.emit('err', ex, contextId)
 
@@ -798,7 +779,7 @@ class bitfinex2 (bitfinex):
 
     def _websocket_handle_subscription(self, contextId, event, msg):
         id = self.safe_string(msg, 'symbol')
-        symbol = self.find_symbol(id)
+        symbol = self.findSymbol(id)
         channel = self.safe_integer(msg, 'chanId')
         chanKey = '_' + str(channel)
         channels = self._contextGet(contextId, 'channels')
@@ -824,8 +805,8 @@ class bitfinex2 (bitfinex):
             chanId = self.safe_integer(msg, 'chanId')
             chanKey = '_' + str(chanId)
             channels = self._contextGet(contextId, 'channels')
-            if not(chanKey in list(channels.keys())):
-                self.emit('err', ExchangeError(self.id + ' msg received from unregistered channels:' + chanId), contextId)
+            if not (chanKey in channels):
+                self.emit('err', new ExchangeError(self.id + ' msg received from unregistered channels:' + chanId), contextId)
                 return
             symbol = channels[chanKey]['symbol']
             event = channels[chanKey]['event']
@@ -839,7 +820,7 @@ class bitfinex2 (bitfinex):
             raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
         # save nonce for subscription response
         symbolData = self._contextGetSymbolData(contextId, event, symbol)
-        if not('sub-nonces' in list(symbolData.keys())):
+        if not ('sub-nonces' in symbolData):
             symbolData['sub-nonces'] = {}
         symbolData['limit'] = self.safe_integer(params, 'limit', None)
         nonceStr = str(nonce)
@@ -872,7 +853,7 @@ class bitfinex2 (bitfinex):
             'event': 'unsubscribe',
             'chanId': symbolData['channelId'],
         }
-        if not('unsub-nonces' in list(symbolData.keys())):
+        if not ('unsub-nonces' in symbolData):
             symbolData['unsub-nonces'] = {}
         nonceStr = str(nonce)
         handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces'])
@@ -890,6 +871,6 @@ class bitfinex2 (bitfinex):
 
     def _get_current_websocket_orderbook(self, contextId, symbol, limit):
         data = self._contextGetSymbolData(contextId, 'ob', symbol)
-        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+        if ('ob' in data) and (data['ob'] is not None):
             return self._cloneOrderBook(data['ob'], limit)
         return None

@@ -15,7 +15,7 @@ from ccxt.base.errors import NotSupported
 from ccxt.base.errors import NetworkError
 
 
-class therock (Exchange):
+class therock(Exchange):
 
     def describe(self):
         return self.deep_extend(super(therock, self).describe(), {
@@ -858,7 +858,7 @@ class therock (Exchange):
         transactions = self.safe_value(response, 'transactions', [])
         transactionTypes = ['withdraw', 'atm_payment']
         depositsAndWithdrawals = self.filter_by_array(transactions, 'type', transactionTypes, False)
-        return self.parseTransactions(depositsAndWithdrawals, currency, since, limit)
+        return self.parse_transactions(depositsAndWithdrawals, currency, since, limit)
 
     def parse_order_status(self, status):
         statuses = {
@@ -1175,17 +1175,12 @@ class therock (Exchange):
         numErrors = len(errors)
         if numErrors > 0:
             feedback = self.id + ' ' + body
-            exact = self.exceptions['exact']
-            broad = self.exceptions['broad']
             # here we raise the first error we can identify
             for i in range(0, numErrors):
                 error = errors[i]
                 message = self.safe_string(error, 'message')
-                if message in exact:
-                    raise exact[message](feedback)
-                broadKey = self.findBroadlyMatchedKey(broad, message)
-                if broadKey is not None:
-                    raise broad[broadKey](feedback)
+                self.throw_exactly_matched_exception(self.exceptions['exact'], message, feedback)
+                self.throw_broadly_matched_exception(self.exceptions['broad'], message, feedback)
             raise ExchangeError(feedback)  # unknown message
 
     def _websocket_on_message(self, contextId, data):
@@ -1215,14 +1210,14 @@ class therock (Exchange):
             lastSeqId = lastSeqIdData[chan]
             lastSeqId = self.sum(lastSeqId, 1)
             if sequeceId != lastSeqId:
-                self.emit('err', NetworkError('sequence error in pusher connection ' + sequeceId + ' != ' + lastSeqId), contextId)
+                self.emit('err', new NetworkError('sequence error in pusher connection ' + sequeceId + ' != ' + lastSeqId), contextId)
                 return
         lastSeqIdData[chan] = sequeceId
         self._contextSet(contextId, 'sequence', lastSeqIdData)
 
     def _websocket_handle_orderbook(self, contextId, msg):
         chan = self.safe_string(msg, 'channel')
-        symbol = self.find_symbol(chan)
+        symbol = self.findSymbol(chan)
         data = self.safe_value(msg, 'data')
         time = self.safe_string(data, 'time')
         timestamp = self.parse8601(time)
@@ -1234,9 +1229,9 @@ class therock (Exchange):
 
     def _websocket_handle_orderbook_diff(self, contextId, msg):
         chan = self.safe_string(msg, 'channel')
-        symbol = self.find_symbol(chan)
+        symbol = self.findSymbol(chan)
         symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
-        if not('ob' in list(symbolData.keys())):
+        if not ('ob' in symbolData):
             # not previous snapshot -> don't process it
             return
         data = self.safe_value(msg, 'data')
@@ -1257,7 +1252,7 @@ class therock (Exchange):
         event = 'ob'
         if chan == 'currency':
             event = 'trade'
-        symbol = self.find_symbol(chan)
+        symbol = self.findSymbol(chan)
         symbolData = self._contextGetSymbolData(contextId, event, symbol)
         if 'sub-nonces' in symbolData:
             nonces = symbolData['sub-nonces']
@@ -1274,7 +1269,7 @@ class therock (Exchange):
             raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
         # save nonce for subscription response
         symbolData = self._contextGetSymbolData(contextId, event, symbol)
-        if not('sub-nonces' in list(symbolData.keys())):
+        if not ('sub-nonces' in symbolData):
             symbolData['sub-nonces'] = {}
         symbolData['limit'] = self.safe_integer(params, 'limit', None)
         nonceStr = str(nonce)
@@ -1313,6 +1308,6 @@ class therock (Exchange):
 
     def _get_current_websocket_orderbook(self, contextId, symbol, limit):
         data = self._contextGetSymbolData(contextId, 'ob', symbol)
-        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+        if ('ob' in data) and (data['ob'] is not None):
             return self._cloneOrderBook(data['ob'], limit)
         return None

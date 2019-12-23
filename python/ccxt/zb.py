@@ -10,6 +10,7 @@ import json
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
 from ccxt.base.errors import ArgumentsRequired
+from ccxt.base.errors import BadRequest
 from ccxt.base.errors import InsufficientFunds
 from ccxt.base.errors import InvalidOrder
 from ccxt.base.errors import OrderNotFound
@@ -18,7 +19,7 @@ from ccxt.base.errors import DDoSProtection
 from ccxt.base.errors import ExchangeNotAvailable
 
 
-class zb (Exchange):
+class zb(Exchange):
 
     def describe(self):
         return self.deep_extend(super(zb, self).describe(), {
@@ -73,7 +74,7 @@ class zb (Exchange):
                 '3002': InvalidOrder,  # 'Invalid price',
                 '3003': InvalidOrder,  # 'Invalid amount',
                 '3004': AuthenticationError,  # 'User does not exist',
-                '3005': ExchangeError,  # 'Invalid parameter',
+                '3005': BadRequest,  # 'Invalid parameter',
                 '3006': AuthenticationError,  # 'Invalid IP or inconsistent with the bound IP',
                 '3007': AuthenticationError,  # 'The request time has expired',
                 '3008': OrderNotFound,  # 'Transaction records not found',
@@ -292,6 +293,8 @@ class zb (Exchange):
         marketFieldName = self.get_market_field_name()
         request = {}
         request[marketFieldName] = market['id']
+        if limit is not None:
+            request['size'] = limit
         response = self.publicGetDepth(self.extend(request, params))
         return self.parse_order_book(response)
 
@@ -538,7 +541,7 @@ class zb (Exchange):
         cost = self.safe_float(order, 'trade_money')
         average = None
         status = self.parse_order_status(self.safe_string(order, 'status'))
-        if (cost is not None) and(filled is not None) and(filled > 0):
+        if (cost is not None) and (filled is not None) and (filled > 0):
             average = cost / filled
         id = self.safe_string(order, 'id')
         return {
@@ -602,10 +605,8 @@ class zb (Exchange):
             feedback = self.id + ' ' + body
             if 'code' in response:
                 code = self.safe_string(response, 'code')
-                if code in self.exceptions:
-                    ExceptionClass = self.exceptions[code]
-                    raise ExceptionClass(feedback)
-                elif code != '1000':
+                self.throw_exactly_matched_exception(self.exceptions, code, feedback)
+                if code != '1000':
                     raise ExchangeError(feedback)
             # special case for {"result":false,"message":"服务端忙碌"}(a "Busy Server" reply)
             result = self.safe_value(response, 'result')
@@ -636,13 +637,13 @@ class zb (Exchange):
             return
         pairIdList = self._contextGet(contextId, 'pairids')
         if pairIdList is None:
-            self.emit('err', ExchangeError(self.id + ' internal error: unitialized pairids dict in context '))
+            self.emit('err', new ExchangeError(self.id + ' internal error: unitialized pairids dict in context '))
             return
-        if not(pairId in list(pairIdList.keys())):
-            self.emit('err', ExchangeError(self.id + ' error receiving unexpected market id ' + pairId))
+        if not (pairId in pairIdList):
+            self.emit('err', new ExchangeError(self.id + ' error receiving unexpected market id ' + pairId))
             return
         id = pairIdList[pairId]
-        symbol = self.find_symbol(id)
+        symbol = self.findSymbol(id)
         if not success:
             code = self.safe_string(msg, 'code', '0')
             errMsg = self.safe_string(msg, 'message', 'unknown error')
@@ -689,7 +690,7 @@ class zb (Exchange):
         pairIdList[pairId] = id
         self._contextSet(contextId, 'pairids', pairIdList)
         data = self._contextGetSymbolData(contextId, event, symbol)
-        if not('sub-nonces' in list(data.keys())):
+        if not ('sub-nonces' in data):
             data['sub-nonces'] = {}
         nonceStr = str(nonce)
         handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonces'])
@@ -711,6 +712,6 @@ class zb (Exchange):
 
     def _get_current_websocket_orderbook(self, contextId, symbol, limit):
         data = self._contextGetSymbolData(contextId, 'ob', symbol)
-        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+        if ('ob' in data) and (data['ob'] is not None):
             return self._cloneOrderBook(data['ob'], limit)
         return None

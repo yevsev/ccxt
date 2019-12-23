@@ -17,7 +17,7 @@ from ccxt.base.errors import OrderNotFound
 from ccxt.base.errors import NotSupported
 
 
-class gdax (Exchange):
+class gdax(Exchange):
 
     def describe(self):
         return self.deep_extend(super(gdax, self).describe(), {
@@ -614,7 +614,7 @@ class gdax (Exchange):
 
     async def fetch_transactions(self, code=None, since=None, limit=None, params={}):
         await self.load_markets()
-        await self.loadAccounts()
+        await self.load_accounts()
         currency = None
         id = self.safe_string(params, 'id')  # account id
         if id is None:
@@ -634,7 +634,7 @@ class gdax (Exchange):
         response = await self.privateGetAccountsIdTransfers(self.extend(request, params))
         for i in range(0, len(response)):
             response[i]['currency'] = code
-        return self.parseTransactions(response, currency, since, limit)
+        return self.parse_transactions(response, currency, since, limit)
 
     def parse_transaction_status(self, transaction):
         canceled = self.safe_value(transaction, 'canceled_at')
@@ -772,7 +772,7 @@ class gdax (Exchange):
                 if message in exact:
                     raise exact[message](feedback)
                 broad = self.exceptions['broad']
-                broadKey = self.findBroadlyMatchedKey(broad, message)
+                broadKey = self.find_broadly_matched_key(broad, message)
                 if broadKey is not None:
                     raise broad[broadKey](feedback)
                 raise ExchangeError(feedback)  # unknown message
@@ -810,7 +810,7 @@ class gdax (Exchange):
 
     def _websocket_handle_ob_snapshot(self, contextId, msg):
         id = self.safe_string(msg, 'product_id')
-        symbol = self.find_symbol(id)
+        symbol = self.findSymbol(id)
         symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
         ob = self.parse_order_book(msg)
         symbolData['ob'] = ob
@@ -819,7 +819,7 @@ class gdax (Exchange):
 
     def _websocket_handle_ob_update(self, contextId, msg):
         id = self.safe_string(msg, 'product_id')
-        symbol = self.find_symbol(id)
+        symbol = self.findSymbol(id)
         symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
         ob = symbolData['ob']
         changes = self.safe_value(msg, 'changes', [])
@@ -835,7 +835,7 @@ class gdax (Exchange):
         self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
 
     def _websocket_handle_subscription(self, contextId, event, msg):
-        symbol = self.find_symbol(msg)
+        symbol = self.findSymbol(msg)
         symbolData = self._contextGetSymbolData(contextId, event, symbol)
         if 'sub-nonces' in symbolData:
             nonces = symbolData['sub-nonces']
@@ -871,7 +871,7 @@ class gdax (Exchange):
             raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
         # save nonce for subscription response
         symbolData = self._contextGetSymbolData(contextId, event, symbol)
-        if not('sub-nonces' in list(symbolData.keys())):
+        if not ('sub-nonces' in symbolData):
             symbolData['sub-nonces'] = {}
         symbolData['limit'] = self.safe_integer(params, 'limit', None)
         nonceStr = str(nonce)
@@ -896,7 +896,7 @@ class gdax (Exchange):
             'channels': ['level2'],
         }
         symbolData = self._contextGetSymbolData(contextId, event, symbol)
-        if not('unsub-nonces' in list(symbolData.keys())):
+        if not ('unsub-nonces' in symbolData):
             symbolData['unsub-nonces'] = {}
         nonceStr = str(nonce)
         handle = self._setTimeout(contextId, self.timeout, self._websocketMethodMap('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces'])
@@ -914,6 +914,6 @@ class gdax (Exchange):
 
     def _get_current_websocket_orderbook(self, contextId, symbol, limit):
         data = self._contextGetSymbolData(contextId, 'ob', symbol)
-        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+        if ('ob' in data) and (data['ob'] is not None):
             return self._cloneOrderBook(data['ob'], limit)
         return None

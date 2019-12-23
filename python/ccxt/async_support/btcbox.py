@@ -22,7 +22,7 @@ from ccxt.base.errors import DDoSProtection
 from ccxt.base.errors import InvalidNonce
 
 
-class btcbox (Exchange):
+class btcbox(Exchange):
 
     def describe(self):
         return self.deep_extend(super(btcbox, self).describe(), {
@@ -357,20 +357,16 @@ class btcbox (Exchange):
         result = self.safe_value(response, 'result')
         if result is None or result is True:
             return  # either public API(no error codes expected) or success
-        errorCode = self.safe_value(response, 'code')
-        feedback = self.id + ' ' + self.json(response)
-        exceptions = self.exceptions
-        if errorCode in exceptions:
-            raise exceptions[errorCode](feedback)
+        code = self.safe_value(response, 'code')
+        feedback = self.id + ' ' + body
+        self.throw_exactly_matched_exception(self.exceptions, code, feedback)
         raise ExchangeError(feedback)  # unknown message
 
     async def request(self, path, api='public', method='GET', params={}, headers=None, body=None):
         response = await self.fetch2(path, api, method, params, headers, body)
-        # sometimes the exchange returns whitespace prepended to json
-        # the code below removes excessive spaces
         if isinstance(response, basestring):
-            response = response.split(' ')
-            response = ''.join(response)
+            # sometimes the exchange returns whitespace prepended to json
+            response = self.strip(response)
             if not self.is_json_encoded_object(response):
                 raise ExchangeError(self.id + ' ' + response)
             response = json.loads(response)

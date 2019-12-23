@@ -6,10 +6,11 @@
 from ccxt.async_support.base.exchange import Exchange
 import json
 from ccxt.base.errors import ExchangeError
+from ccxt.base.errors import BadSymbol
 from ccxt.base.errors import NotSupported
 
 
-class coincheck (Exchange):
+class coincheck(Exchange):
 
     def describe(self):
         return self.deep_extend(super(coincheck, self).describe(), {
@@ -218,14 +219,14 @@ class coincheck (Exchange):
 
     async def fetch_order_book(self, symbol, limit=None, params={}):
         if symbol != 'BTC/JPY':
-            raise NotSupported(self.id + ' fetchOrderBook() supports BTC/JPY only')
+            raise BadSymbol(self.id + ' fetchOrderBook() supports BTC/JPY only')
         await self.load_markets()
         response = await self.publicGetOrderBooks(params)
         return self.parse_order_book(response)
 
     async def fetch_ticker(self, symbol, params={}):
         if symbol != 'BTC/JPY':
-            raise NotSupported(self.id + ' fetchTicker() supports BTC/JPY only')
+            raise BadSymbol(self.id + ' fetchTicker() supports BTC/JPY only')
         await self.load_markets()
         ticker = await self.publicGetTicker(params)
         timestamp = self.safe_timestamp(ticker, 'timestamp')
@@ -330,7 +331,7 @@ class coincheck (Exchange):
 
     async def fetch_trades(self, symbol, since=None, limit=None, params={}):
         if symbol != 'BTC/JPY':
-            raise NotSupported(self.id + ' fetchTrades() supports BTC/JPY only')
+            raise BadSymbol(self.id + ' fetchTrades() supports BTC/JPY only')
         await self.load_markets()
         market = self.market(symbol)
         request = {
@@ -414,11 +415,11 @@ class coincheck (Exchange):
             self._websocket_handle_ob(contextId, msg)
 
     def _websocket_handle_ob(self, contextId, msg):
-        symbol = self.find_symbol(msg[0])
+        symbol = self.findSymbol(msg[0])
         ob = msg[1]
         # just testing
         data = self._contextGetSymbolData(contextId, 'ob', symbol)
-        if not('ob' in list(data.keys())):
+        if not ('ob' in data):
             ob = self.parse_order_book(ob, None)
             data['ob'] = ob
             self.emit('ob', symbol, self._cloneOrderBook(ob, data['limit']))
@@ -446,6 +447,6 @@ class coincheck (Exchange):
 
     def _get_current_websocket_orderbook(self, contextId, symbol, limit):
         data = self._contextGetSymbolData(contextId, 'ob', symbol)
-        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+        if ('ob' in data) and (data['ob'] is not None):
             return self._cloneOrderBook(data['ob'], limit)
         return None

@@ -2,7 +2,7 @@
 
 # -----------------------------------------------------------------------------
 
-__version__ = '1.18.1115'
+__version__ = '1.21.12'
 
 # -----------------------------------------------------------------------------
 
@@ -68,7 +68,6 @@ class Exchange(BaseExchange, EventEmitter):
         self.websocketDelayedConnections = {}
         self.wsproxy = None
         self.cafile = config.get('cafile', certifi.where())
-        self.open()
         super(Exchange, self).__init__(config)
 
         # snake renaming methods
@@ -150,6 +149,7 @@ class Exchange(BaseExchange, EventEmitter):
 
         request_body = body
         encoded_body = body.encode() if body else None
+        self.open()
         session_method = getattr(self.session, method.lower())
 
         http_response = None
@@ -194,7 +194,9 @@ class Exchange(BaseExchange, EventEmitter):
         self.handle_rest_response(http_response, json_response, url, method)
         if json_response is not None:
             return json_response
-        return http_response
+        if self.is_text_response(headers):
+            return http_response
+        return response.content
 
     async def load_markets(self, reload=False, params={}):
         if not reload:

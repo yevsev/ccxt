@@ -18,7 +18,7 @@ from ccxt.base.errors import ExchangeNotAvailable
 from ccxt.base.decimal_to_precision import TICK_SIZE
 
 
-class bitmex (Exchange):
+class bitmex(Exchange):
 
     def describe(self):
         return self.deep_extend(super(bitmex, self).describe(), {
@@ -177,6 +177,7 @@ class bitmex (Exchange):
             'exceptions': {
                 'exact': {
                     'Invalid API Key.': AuthenticationError,
+                    'This key is disabled.': PermissionDenied,
                     'Access Denied': PermissionDenied,
                     'Duplicate clOrdID': InvalidOrder,
                     'orderQty is invalid': InvalidOrder,
@@ -187,6 +188,7 @@ class bitmex (Exchange):
                     'Signature not valid': AuthenticationError,
                     'overloaded': ExchangeNotAvailable,
                     'Account has insufficient Available Balance': InsufficientFunds,
+                    'Service unavailable': ExchangeNotAvailable,  # {"error":{"message":"Service unavailable","name":"HTTPError"}}
                 },
             },
             'precisionMode': TICK_SIZE,
@@ -450,6 +452,7 @@ class bitmex (Exchange):
         types = {
             'Withdrawal': 'transaction',
             'RealisedPNL': 'margin',
+            'UnrealisedPNL': 'margin',
             'Deposit': 'transaction',
             'Transfer': 'transfer',
             'AffiliatePayout': 'referral',
@@ -475,6 +478,29 @@ class bitmex (Exchange):
         #         timestamp: "2017-03-22T13:09:23.514Z"
         #     }
         #
+        # ButMEX returns the unrealized pnl from the wallet history endpoint.
+        # The unrealized pnl transaction has an empty timestamp.
+        # It is not related to historical pnl it has status set to "Pending".
+        # Therefore it's not a part of the history at all.
+        # https://github.com/ccxt/ccxt/issues/6047
+        #
+        #     {
+        #         "transactID":"00000000-0000-0000-0000-000000000000",
+        #         "account":121210,
+        #         "currency":"XBt",
+        #         "transactType":"UnrealisedPNL",
+        #         "amount":-5508,
+        #         "fee":0,
+        #         "transactStatus":"Pending",
+        #         "address":"XBTUSD",
+        #         "tx":"",
+        #         "text":"",
+        #         "transactTime":null,  # ←---------------------------- null
+        #         "walletBalance":139198767,
+        #         "marginBalance":139193259,
+        #         "timestamp":null  # ←---------------------------- null
+        #     }
+        #
         id = self.safe_string(item, 'transactID')
         account = self.safe_string(item, 'account')
         referenceId = self.safe_string(item, 'tx')
@@ -486,6 +512,11 @@ class bitmex (Exchange):
         if amount is not None:
             amount = amount * 1e-8
         timestamp = self.parse8601(self.safe_string(item, 'transactTime'))
+        if timestamp is None:
+            # https://github.com/ccxt/ccxt/issues/6047
+            # set the timestamp to zero, 1970 Jan 1 00:00:00
+            # for unrealized pnl and other transactions without a timestamp
+            timestamp = 0  # see comments above
         feeCost = self.safe_float(item, 'fee', 0)
         if feeCost is not None:
             feeCost = feeCost * 1e-8
@@ -577,7 +608,7 @@ class bitmex (Exchange):
         currency = None
         if code is not None:
             currency = self.currency(code)
-        return self.parseTransactions(transactions, currency, since, limit)
+        return self.parse_transactions(transactions, currency, since, limit)
 
     def parse_transaction_status(self, status):
         statuses = {
@@ -965,7 +996,7 @@ class bitmex (Exchange):
             }
         takerOrMaker = None
         if fee is not None:
-            takerOrMaker = fee['cost'] < 'maker' if 0 else 'taker'
+            takerOrMaker = 'maker' if (fee['cost'] < 0) else 'taker'
         symbol = None
         marketId = self.safe_string(trade, 'symbol')
         if marketId is not None:
@@ -1174,13 +1205,8 @@ class bitmex (Exchange):
             error = self.safe_value(response, 'error', {})
             message = self.safe_string(error, 'message')
             feedback = self.id + ' ' + body
-            exact = self.exceptions['exact']
-            if message in exact:
-                raise exact[message](feedback)
-            broad = self.exceptions['broad']
-            broadKey = self.findBroadlyMatchedKey(broad, message)
-            if broadKey is not None:
-                raise broad[broadKey](feedback)
+            self.throw_exactly_matched_exception(self.exceptions['exact'], message, feedback)
+            self.throw_broadly_matched_exception(self.exceptions['broad'], message, feedback)
             if code == 400:
                 raise BadRequest(feedback)
             raise ExchangeError(feedback)  # unknown message
@@ -1278,12 +1304,12 @@ class bitmex (Exchange):
         self._contextSet(contextId, 'pongtimers', pongTimers)
 
     def _websocket_timeout_pong(self, contextId, sequence):
-        self.emit('err', ExchangeError(self.id + ' no pong received for ' + sequence), contextId)
+        self.emit('err', new ExchangeError(self.id + ' no pong received for ' + sequence), contextId)
 
     def _websocket_handle_error(self, contextId, msg):
         status = self.safe_integer(msg, 'status')
         error = self.safe_string(msg, 'error')
-        self.emit('err', ExchangeError(self.id + ' status ' + status + ':' + error), contextId)
+        self.emit('err', new ExchangeError(self.id + ' status ' + status + ':' + error), contextId)
 
     def _websocket_restart_ping_timer(self, contextId):
         # reset ping timer
@@ -1314,7 +1340,7 @@ class bitmex (Exchange):
             else:
                 event = None
             if event is not None:
-                symbol = self.find_symbol(parts[1])
+                symbol = self.findSymbol(parts[1])
                 symbolData = self._contextGetSymbolData(contextId, event, symbol)
                 if 'sub-nonces' in symbolData:
                     nonces = symbolData['sub-nonces']
@@ -1340,7 +1366,7 @@ class bitmex (Exchange):
             else:
                 event = None
             if event is not None:
-                symbol = self.find_symbol(parts[1])
+                symbol = self.findSymbol(parts[1])
                 if success and event == 'ob':
                     dbids = self._contextGet(contextId, 'dbids')
                     if symbol in dbids:
@@ -1364,7 +1390,7 @@ class bitmex (Exchange):
             return
         symbol = self.safe_string(data[0], 'symbol')
         trades = self.parse_trades(data)
-        symbol = self.find_symbol(symbol)
+        symbol = self.findSymbol(symbol)
         for t in range(0, len(trades)):
             self.emit('trade', symbol, trades[t])
 
@@ -1373,7 +1399,7 @@ class bitmex (Exchange):
         data = self.safe_value(msg, 'data')
         symbol = self.safe_string(data[0], 'symbol')
         dbids = self._contextGet(contextId, 'dbids')
-        symbol = self.find_symbol(symbol)
+        symbol = self.findSymbol(symbol)
         symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
         if action == 'partial':
             ob = {
@@ -1437,7 +1463,7 @@ class bitmex (Exchange):
                 symbolData['ob'] = curob
                 self.emit('ob', symbol, self._cloneOrderBook(curob, symbolData['limit']))
         else:
-            self.emit('err', ExchangeError(self.id + ' invalid orderbook message'))
+            self.emit('err', new ExchangeError(self.id + ' invalid orderbook message'))
         self._contextSet(contextId, 'dbids', dbids)
         self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
 
@@ -1445,7 +1471,7 @@ class bitmex (Exchange):
         if event != 'ob' and event != 'trade':
             raise NotSupported('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
         symbolData = self._contextGetSymbolData(contextId, event, symbol)
-        if not('sub-nonces' in list(symbolData.keys())):
+        if not ('sub-nonces' in symbolData):
             symbolData['sub-nonces'] = {}
         id = self.market_id(symbol).upper()
         payload = None
@@ -1470,7 +1496,7 @@ class bitmex (Exchange):
         if event != 'ob' and event != 'trade':
             raise NotSupported('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + self.id)
         symbolData = self._contextGetSymbolData(contextId, event, symbol)
-        if not('unsub-nonces' in list(symbolData.keys())):
+        if not ('unsub-nonces' in symbolData):
             symbolData['unsub-nonces'] = {}
         id = self.market_id(symbol).upper()
         payload = None
@@ -1500,6 +1526,6 @@ class bitmex (Exchange):
 
     def _get_current_websocket_orderbook(self, contextId, symbol, limit):
         data = self._contextGetSymbolData(contextId, 'ob', symbol)
-        if ('ob' in list(data.keys())) and(data['ob'] is not None):
+        if ('ob' in data) and (data['ob'] is not None):
             return self._cloneOrderBook(data['ob'], limit)
         return None

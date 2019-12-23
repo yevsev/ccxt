@@ -385,22 +385,17 @@ module.exports = class btcbox extends Exchange {
         if (result === undefined || result === true) {
             return; // either public API (no error codes expected) or success
         }
-        const errorCode = this.safeValue (response, 'code');
-        const feedback = this.id + ' ' + this.json (response);
-        const exceptions = this.exceptions;
-        if (errorCode in exceptions) {
-            throw new exceptions[errorCode] (feedback);
-        }
+        const code = this.safeValue (response, 'code');
+        const feedback = this.id + ' ' + body;
+        this.throwExactlyMatchedException (this.exceptions, code, feedback);
         throw new ExchangeError (feedback); // unknown message
     }
 
     async request (path, api = 'public', method = 'GET', params = {}, headers = undefined, body = undefined) {
         let response = await this.fetch2 (path, api, method, params, headers, body);
-        // sometimes the exchange returns whitespace prepended to json
-        // the code below removes excessive spaces
         if (typeof response === 'string') {
-            response = response.split (' ');
-            response = response.join ('');
+            // sometimes the exchange returns whitespace prepended to json
+            response = this.strip (response);
             if (!this.isJsonEncodedObject (response)) {
                 throw new ExchangeError (this.id + ' ' + response);
             }
