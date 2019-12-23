@@ -2,7 +2,7 @@
 
 namespace ccxt;
 use Evenement\EventEmitter;
-//require __DIR__.'/../../vendor/autoload.php';
+//require_once __DIR__.'/../../../vendor/autoload.php';
 
 
 abstract class CcxtEventEmitter {

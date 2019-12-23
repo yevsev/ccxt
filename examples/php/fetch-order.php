@@ -2,7 +2,8 @@
 
 $root = dirname(dirname(dirname(__FILE__)));
 
-include $root . '/ccxt.php';
+//include $root . '/ccxt.php';
+require_once __DIR__.'/../../vendor/autoload.php';
 
 date_default_timezone_set('UTC');
 
