@@ -2370,17 +2370,6 @@ module.exports = class Exchange extends EventEmitter{
         return marketId;
     }
 
-    findSymbol (string, market = undefined) {
-
-        if (market === undefined)
-            market = this.findMarket (string)
-
-        if (typeof market === 'object')
-            return market['symbol']
-
-        return string
-    }
-
     _websocketMarketId (symbol) {
         return this.marketId (symbol)
     }
