@@ -2364,7 +2364,7 @@ module.exports = class Exchange extends EventEmitter{
 
     _websocketFindSymbol (marketId){
         if (marketId in this.markets_by_id) {
-            market = this.markets_by_id[marketId];
+            const market = this.markets_by_id[marketId];
             return market['symbol'];
         }
         return marketId;
