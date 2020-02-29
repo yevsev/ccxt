@@ -749,7 +749,7 @@ class gateio(Exchange):
         params = self.safe_value(msg, 'params')
         clean = params[0]
         ob = params[1]
-        symbol = self.findSymbol(params[2].lower())
+        symbol = self._websocketFindSymbol(params[2].lower())
         if clean:
             ob = self.parse_order_book(ob, None)
             data = self._contextGetSymbolData(contextId, 'ob', symbol)

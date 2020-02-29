@@ -812,7 +812,7 @@ class gateio extends Exchange {
         $params = $this->safe_value($msg, 'params');
         $clean = $params[0];
         $ob = $params[1];
-        $symbol = $this->findSymbol (strtolower($params[2]));
+        $symbol = $this->_websocketFindSymbol (strtolower($params[2]));
         if ($clean) {
             $ob = $this->parse_order_book($ob, null);
             $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);

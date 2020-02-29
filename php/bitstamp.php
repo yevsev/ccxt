@@ -1194,7 +1194,7 @@ class bitstamp extends Exchange {
         if (strlen($parts) > 2) {
             $id = $parts[2];
         }
-        $symbol = $this->findSymbol ($id);
+        $symbol = $this->_websocketFindSymbol ($id);
         $data = $this->safe_value($msg, 'data');
         $timestamp = $this->safe_integer($data, 'timestamp');
         $ob = $this->parse_order_book($data, $timestamp * 1000);
@@ -1231,7 +1231,7 @@ class bitstamp extends Exchange {
         if (strlen($parts) > 2) {
             $id = $parts[2];
         }
-        $symbol = $this->findSymbol ($id);
+        $symbol = $this->_websocketFindSymbol ($id);
         $data = $this->safe_value($msg, 'data');
         $trade = $this->_websocket_parse_trade ($data, $symbol);
         $this->emit ('trade', $symbol, $trade);
@@ -1253,7 +1253,7 @@ class bitstamp extends Exchange {
             if (strlen($parts) > 2) {
                 $id = $parts[2];
             }
-            $symbol = $this->findSymbol ($id);
+            $symbol = $this->_websocketFindSymbol ($id);
             $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
             if (is_array($symbolData) && array_key_exists('sub-nonces', $symbolData)) {
                 $nonces = $symbolData['sub-nonces'];

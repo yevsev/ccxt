@@ -1796,7 +1796,7 @@ module.exports = class binance extends Exchange {
             if (msgType === 'depth') {
                 this._websocketHandleOb (contextId, resData);
             } else if (msgType.indexOf ('depth') >= 0) {
-                const symbol = this.findSymbol (parts[0]);
+                const symbol = this._websocketFindSymbol (parts[0]);
                 this._websocketHandlePartialOb (contextId, symbol, resData);
             } else if (msgType === 'trade') {
                 this._websocketHandleTrade (contextId, resData);
@@ -1811,7 +1811,7 @@ module.exports = class binance extends Exchange {
     }
 
     _websocketHandleOb (contextId, data) {
-        const symbol = this.findSymbol (this.safeString (data, 's'));
+        const symbol = this._websocketFindSymbol (this.safeString (data, 's'));
         // if asyncContext has no previous orderbook you have to cache all deltas
         // and fetch orderbook from rest api
         let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
@@ -1865,14 +1865,14 @@ module.exports = class binance extends Exchange {
     }
 
     _websocketHandleTrade (contextId, data) {
-        const symbol = this.findSymbol (this.safeString (data, 's'));
+        const symbol = this._websocketFindSymbol (this.safeString (data, 's'));
         const market = this.market (symbol);
         const trade = this.parseTrade (data, market);
         this.emit ('trade', symbol, trade);
     }
 
     _websocketHandleKline (contextId, data) {
-        const symbol = this.findSymbol (this.safeString (data, 's'));
+        const symbol = this._websocketFindSymbol (this.safeString (data, 's'));
         const market = this.market (symbol);
         const kline = this.parseOHLCV ([
             this.safeFloat (data['k'], 't'),
@@ -1886,7 +1886,7 @@ module.exports = class binance extends Exchange {
     }
 
     _websocketHandleTicker (contextId, data) {
-        const symbol = this.findSymbol (this.safeString (data, 's'));
+        const symbol = this._websocketFindSymbol (this.safeString (data, 's'));
         const market = this.market (symbol);
         const ticker = this.parseTicker ({
             'symbol': this.safeString (data, 's'),
@@ -1995,7 +1995,7 @@ module.exports = class binance extends Exchange {
                 const pair = stream.split ('@');
                 partsLen = pair.length;
                 if (partsLen >= 2) {
-                    // let symbol = this.findSymbol (pair[0].toUpperCase ());
+                    // let symbol = this._websocketFindSymbol (pair[0].toUpperCase ());
                     let event = pair[1].toLowerCase ();
                     if (event === 'depth') {
                         event = 'ob';

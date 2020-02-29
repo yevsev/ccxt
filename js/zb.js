@@ -694,7 +694,7 @@ module.exports = class zb extends Exchange {
             return;
         }
         const id = pairIdList[pairId];
-        const symbol = this.findSymbol (id);
+        const symbol = this._websocketFindSymbol (id);
         if (!success) {
             const code = this.safeString (msg, 'code', '0');
             const errMsg = this.safeString (msg, 'message', 'unknown error');

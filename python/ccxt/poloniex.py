@@ -1495,7 +1495,7 @@ class poloniex(Exchange):
         sequenceNumber = data[1]
         if len(data) > 2:
             orderbook = data[2]
-            # symbol = self.findSymbol str((channelId))
+            # symbol = self._websocketFindSymbol str((channelId))
             # Check if self is the first response which contains full current orderbook
             if orderbook[0][0] == 'i':
                 if not self._contextIsSubscribed(contextId, 'ob', symbol):

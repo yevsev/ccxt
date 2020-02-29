@@ -1176,7 +1176,7 @@ class huobipro(Exchange):
         channel = vals[2]
         # :symbol
         # symbol = self.marketsById[rawsymbol].symbol
-        symbol = self.findSymbol(rawsymbol)
+        symbol = self._websocketFindSymbol(rawsymbol)
         # channel = data.ch.split('.')[2]
         if channel == 'depth':
             # :ob emit

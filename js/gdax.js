@@ -891,7 +891,7 @@ module.exports = class gdax extends Exchange {
 
     _websocketHandleObSnapshot (contextId, msg) {
         const id = this.safeString (msg, 'product_id');
-        const symbol = this.findSymbol (id);
+        const symbol = this._websocketFindSymbol (id);
         const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         const ob = this.parseOrderBook (msg);
         symbolData['ob'] = ob;
@@ -901,7 +901,7 @@ module.exports = class gdax extends Exchange {
 
     _websocketHandleObUpdate (contextId, msg) {
         const id = this.safeString (msg, 'product_id');
-        const symbol = this.findSymbol (id);
+        const symbol = this._websocketFindSymbol (id);
         const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         const ob = symbolData['ob'];
         const changes = this.safeValue (msg, 'changes', []);
@@ -919,7 +919,7 @@ module.exports = class gdax extends Exchange {
     }
 
     _websocketHandleSubscription (contextId, event, msg) {
-        const symbol = this.findSymbol (msg);
+        const symbol = this._websocketFindSymbol (msg);
         const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if ('sub-nonces' in symbolData) {
             const nonces = symbolData['sub-nonces'];

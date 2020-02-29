@@ -1093,7 +1093,7 @@ class bitstamp(Exchange):
         id = 'btcusd'
         if len(parts) > 2:
             id = parts[2]
-        symbol = self.findSymbol(id)
+        symbol = self._websocketFindSymbol(id)
         data = self.safe_value(msg, 'data')
         timestamp = self.safe_integer(data, 'timestamp')
         ob = self.parse_order_book(data, timestamp * 1000)
@@ -1126,7 +1126,7 @@ class bitstamp(Exchange):
         id = 'btcusd'
         if len(parts) > 2:
             id = parts[2]
-        symbol = self.findSymbol(id)
+        symbol = self._websocketFindSymbol(id)
         data = self.safe_value(msg, 'data')
         trade = self._websocket_parse_trade(data, symbol)
         self.emit('trade', symbol, trade)
@@ -1145,7 +1145,7 @@ class bitstamp(Exchange):
             id = 'btcusd'
             if len(parts) > 2:
                 id = parts[2]
-            symbol = self.findSymbol(id)
+            symbol = self._websocketFindSymbol(id)
             symbolData = self._contextGetSymbolData(contextId, event, symbol)
             if 'sub-nonces' in symbolData:
                 nonces = symbolData['sub-nonces']

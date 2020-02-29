@@ -807,7 +807,7 @@ module.exports = class gateio extends Exchange {
         const params = this.safeValue (msg, 'params');
         const clean = params[0];
         let ob = params[1];
-        const symbol = this.findSymbol (params[2].toLowerCase ());
+        const symbol = this._websocketFindSymbol (params[2].toLowerCase ());
         if (clean) {
             ob = this.parseOrderBook (ob, undefined);
             const data = this._contextGetSymbolData (contextId, 'ob', symbol);

@@ -457,7 +457,7 @@ module.exports = class coincheck extends Exchange {
     }
 
     _websocketHandleOb (contextId, msg) {
-        const symbol = this.findSymbol (msg[0]);
+        const symbol = this._websocketFindSymbol (msg[0]);
         let ob = msg[1];
         // just testing
         const data = this._contextGetSymbolData (contextId, 'ob', symbol);

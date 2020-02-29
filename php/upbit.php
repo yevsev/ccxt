@@ -1575,7 +1575,7 @@ class upbit extends Exchange {
         $id = str_replace('CRIX.UPBIT.', '', $code);
         $type = str_replace('crix', '', $type);
         $type = strtolower($type);
-        $symbol = $this->findSymbol ($id);
+        $symbol = $this->_websocketFindSymbol ($id);
         if ($type === 'orderbook') {
             $this->_websocket_handle_order_book ($contextId, $symbol, $msg);
         } else if ($type === 'trade') {

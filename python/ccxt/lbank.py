@@ -638,7 +638,7 @@ class lbank(Exchange):
             if partsLen > 5:
                 if parts[5] == 'depth':
                     # orderbook
-                    symbol = self.findSymbol(parts[3] + '_' + parts[4])
+                    symbol = self._websocketFindSymbol(parts[3] + '_' + parts[4])
                     # try to match with subscription
                     found = False
                     data = self._contextGetSymbolData(contextId, 'ob', symbol)
@@ -668,7 +668,7 @@ class lbank(Exchange):
             partsLen = len(parts)
             if partsLen > 5:
                 if parts[5] == 'depth':
-                    symbol = self.findSymbol(parts[3] + '_' + parts[4])
+                    symbol = self._websocketFindSymbol(parts[3] + '_' + parts[4])
                     self._websocket_handle_ob(contextId, msg, symbol)
             else:
                 self.emit('err', new ExchangeError(self.id + ' invalid channel ' + channel))

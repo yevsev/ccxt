@@ -1288,7 +1288,7 @@ module.exports = class therock extends Exchange {
 
     _websocketHandleOrderbook (contextId, msg) {
         const chan = this.safeString (msg, 'channel');
-        const symbol = this.findSymbol (chan);
+        const symbol = this._websocketFindSymbol (chan);
         const data = this.safeValue (msg, 'data');
         const time = this.safeString (data, 'time');
         const timestamp = this.parse8601 (time);
@@ -1301,7 +1301,7 @@ module.exports = class therock extends Exchange {
 
     _websocketHandleOrderbookDiff (contextId, msg) {
         const chan = this.safeString (msg, 'channel');
-        const symbol = this.findSymbol (chan);
+        const symbol = this._websocketFindSymbol (chan);
         const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (!('ob' in symbolData)) {
             // not previous snapshot -> don't process it
@@ -1327,7 +1327,7 @@ module.exports = class therock extends Exchange {
         if (chan === 'currency') {
             event = 'trade';
         }
-        const symbol = this.findSymbol (chan);
+        const symbol = this._websocketFindSymbol (chan);
         const symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if ('sub-nonces' in symbolData) {
             const nonces = symbolData['sub-nonces'];

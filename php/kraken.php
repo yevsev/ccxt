@@ -1492,7 +1492,7 @@ class kraken extends Exchange {
         } else if ($event === 'subscriptionStatus') {
             // $event
             $id = $this->safe_string($msg, 'pair');
-            $symbol = $this->findSymbol ($id);
+            $symbol = $this->_websocketFindSymbol ($id);
             if ($symbol === null) {
                 $symbol = $id;
             }

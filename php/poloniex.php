@@ -1635,7 +1635,7 @@ class poloniex extends Exchange {
         $sequenceNumber = $data[1];
         if (strlen($data) > 2) {
             $orderbook = $data[2];
-            // $symbol = $this->findSymbol (string) ($channelId);
+            // $symbol = $this->_websocketFindSymbol (string) ($channelId);
             // Check if this is the first response which contains full current $orderbook
             if ($orderbook[0][0] === 'i') {
                 if (!$this->_contextIsSubscribed ($contextId, 'ob', $symbol)) {

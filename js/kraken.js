@@ -1482,7 +1482,7 @@ module.exports = class kraken extends Exchange {
         } else if (event === 'subscriptionStatus') {
             // event
             const id = this.safeString (msg, 'pair');
-            let symbol = this.findSymbol (id);
+            let symbol = this._websocketFindSymbol (id);
             if (symbol === undefined) {
                 symbol = id;
             }

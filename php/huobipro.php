@@ -1288,7 +1288,7 @@ class huobipro extends Exchange {
         $channel = $vals[2];
         // :$symbol
         // $symbol = $this->marketsById[$rawsymbol].symbol;
-        $symbol = $this->findSymbol ($rawsymbol);
+        $symbol = $this->_websocketFindSymbol ($rawsymbol);
         // $channel = $data->ch.split('.')[2];
         if ($channel === 'depth') {
             // :$ob emit

@@ -1217,7 +1217,7 @@ class therock(Exchange):
 
     def _websocket_handle_orderbook(self, contextId, msg):
         chan = self.safe_string(msg, 'channel')
-        symbol = self.findSymbol(chan)
+        symbol = self._websocketFindSymbol(chan)
         data = self.safe_value(msg, 'data')
         time = self.safe_string(data, 'time')
         timestamp = self.parse8601(time)
@@ -1229,7 +1229,7 @@ class therock(Exchange):
 
     def _websocket_handle_orderbook_diff(self, contextId, msg):
         chan = self.safe_string(msg, 'channel')
-        symbol = self.findSymbol(chan)
+        symbol = self._websocketFindSymbol(chan)
         symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
         if not ('ob' in symbolData):
             # not previous snapshot -> don't process it
@@ -1252,7 +1252,7 @@ class therock(Exchange):
         event = 'ob'
         if chan == 'currency':
             event = 'trade'
-        symbol = self.findSymbol(chan)
+        symbol = self._websocketFindSymbol(chan)
         symbolData = self._contextGetSymbolData(contextId, event, symbol)
         if 'sub-nonces' in symbolData:
             nonces = symbolData['sub-nonces']

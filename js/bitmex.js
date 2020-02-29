@@ -1451,7 +1451,7 @@ module.exports = class bitmex extends Exchange {
                 event = undefined;
             }
             if (typeof event !== 'undefined') {
-                const symbol = this.findSymbol (parts[1]);
+                const symbol = this._websocketFindSymbol (parts[1]);
                 const symbolData = this._contextGetSymbolData (contextId, event, symbol);
                 if ('sub-nonces' in symbolData) {
                     const nonces = symbolData['sub-nonces'];
@@ -1483,7 +1483,7 @@ module.exports = class bitmex extends Exchange {
                 event = undefined;
             }
             if (typeof event !== 'undefined') {
-                const symbol = this.findSymbol (parts[1]);
+                const symbol = this._websocketFindSymbol (parts[1]);
                 if (success && event === 'ob') {
                     const dbids = this._contextGet (contextId, 'dbids');
                     if (symbol in dbids) {
@@ -1515,7 +1515,7 @@ module.exports = class bitmex extends Exchange {
         }
         let symbol = this.safeString (data[0], 'symbol');
         const trades = this.parseTrades (data);
-        symbol = this.findSymbol (symbol);
+        symbol = this._websocketFindSymbol (symbol);
         for (let t = 0; t < trades.length; t++) {
             this.emit ('trade', symbol, trades[t]);
         }
@@ -1526,7 +1526,7 @@ module.exports = class bitmex extends Exchange {
         const data = this.safeValue (msg, 'data');
         let symbol = this.safeString (data[0], 'symbol');
         const dbids = this._contextGet (contextId, 'dbids');
-        symbol = this.findSymbol (symbol);
+        symbol = this._websocketFindSymbol (symbol);
         const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (action === 'partial') {
             const ob = {

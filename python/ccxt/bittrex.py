@@ -1448,7 +1448,7 @@ class bittrex(Exchange):
 
     def _websocket_handle_order_book_snapshot(self, contextId, data):
         id = self.safe_string(data, 'M')
-        symbol = self.findSymbol(id)
+        symbol = self._websocketFindSymbol(id)
         if not self._contextIsSubscribed(contextId, 'ob', symbol):
             return
         ob = self.parse_order_book(data, None, 'Z', 'S', 'R', 'Q')
@@ -1460,7 +1460,7 @@ class bittrex(Exchange):
     def _websocket_handle_order_book_delta(self, contextId, data):
         # {"M":"USDT-BTC","N":912014,"Z":[{"TY":0,"R":3504.97634920,"Q":0.26480207},{"TY":1,"R":3504.97634919,"Q":0.0}],"S":[{"TY":0,"R":3579.37236706,"Q":0.21455380},{"TY":1,"R":6429.20850000,"Q":0.0}],"f":[]}
         id = self.safe_string(data, 'M')
-        symbol = self.findSymbol(id)
+        symbol = self._websocketFindSymbol(id)
         if self._contextIsSubscribed(contextId, 'ob', symbol):
             symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
             if 'ob' in symbolData:

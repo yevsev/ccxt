@@ -675,11 +675,11 @@ class bitfinex2(bitfinex):
         ex = ExchangeError(self.id + ' ' + errorCode + ':' + errorMsg)
         if channel == 'book':
             id = self.safe_string(msg, 'symbol')
-            symbol = self.findSymbol(id)
+            symbol = self._websocketFindSymbol(id)
             self._websocket_process_pending_nonces(contextId, 'sub-nonces', 'ob', symbol, False, ex)
         elif channel == 'trades':
             id = self.safe_string(msg, 'symbol')
-            symbol = self.findSymbol(id)
+            symbol = self._websocketFindSymbol(id)
             self._websocket_process_pending_nonces(contextId, 'sub-nonces', 'trade', symbol, False, ex)
         self.emit('err', ex, contextId)
 
@@ -779,7 +779,7 @@ class bitfinex2(bitfinex):
 
     def _websocket_handle_subscription(self, contextId, event, msg):
         id = self.safe_string(msg, 'symbol')
-        symbol = self.findSymbol(id)
+        symbol = self._websocketFindSymbol(id)
         channel = self.safe_integer(msg, 'chanId')
         chanKey = '_' + str(channel)
         channels = self._contextGet(contextId, 'channels')

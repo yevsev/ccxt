@@ -1364,7 +1364,7 @@ class kraken(Exchange):
         elif event == 'subscriptionStatus':
             # event
             id = self.safe_string(msg, 'pair')
-            symbol = self.findSymbol(id)
+            symbol = self._websocketFindSymbol(id)
             if symbol is None:
                 symbol = id
             subscriptionInfo = self.safe_value(msg, 'subscription')

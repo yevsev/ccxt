@@ -789,7 +789,7 @@ class gemini(Exchange):
             parts = parts[0].split('/')
             partsLen = len(parts)
             symbol = parts[partsLen - 1]
-            symbol = self.findSymbol(symbol)
+            symbol = self._websocketFindSymbol(symbol)
             self._contextSet(contextId, 'symbol', symbol)
             params = params.split('&')
             for i in range(0, len(params)):

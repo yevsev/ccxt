@@ -686,7 +686,7 @@ module.exports = class lbank extends Exchange {
             if (partsLen > 5) {
                 if (parts[5] === 'depth') {
                     // orderbook
-                    const symbol = this.findSymbol (parts[3] + '_' + parts[4]);
+                    const symbol = this._websocketFindSymbol (parts[3] + '_' + parts[4]);
                     // try to match with subscription
                     let found = false;
                     const data = this._contextGetSymbolData (contextId, 'ob', symbol);
@@ -723,7 +723,7 @@ module.exports = class lbank extends Exchange {
             const partsLen = parts.length;
             if (partsLen > 5) {
                 if (parts[5] === 'depth') {
-                    const symbol = this.findSymbol (parts[3] + '_' + parts[4]);
+                    const symbol = this._websocketFindSymbol (parts[3] + '_' + parts[4]);
                     this._websocketHandleOb (contextId, msg, symbol);
                 }
             } else {

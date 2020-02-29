@@ -461,7 +461,7 @@ class coincheck extends Exchange {
     }
 
     public function _websocket_handle_ob ($contextId, $msg) {
-        $symbol = $this->findSymbol ($msg[0]);
+        $symbol = $this->_websocketFindSymbol ($msg[0]);
         $ob = $msg[1];
         // just testing
         $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);

@@ -1486,7 +1486,7 @@ class upbit(Exchange):
         id = code.replace('CRIX.UPBIT.', '')
         type = type.replace('crix', '')
         type = type.lower()
-        symbol = self.findSymbol(id)
+        symbol = self._websocketFindSymbol(id)
         if type == 'orderbook':
             self._websocket_handle_order_book(contextId, symbol, msg)
         elif type == 'trade':

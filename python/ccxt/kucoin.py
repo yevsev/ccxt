@@ -1632,7 +1632,7 @@ class kucoin(Exchange):
         subject = self.safe_string(msg, 'subject')
         data = self.safe_value(msg, 'data')
         # symbolId = self.safe_string(data, 'symbol')
-        # symbol = self.findSymbol(symbolId)
+        # symbol = self._websocketFindSymbol(symbolId)
         # symbolData = self._contextGetSymbolData(contextId, 'trade', symbol)
         # seqId = self.safe_integer(msg['data'], 'sequence')
         # if 'trade_sequence_id' in symbolData:
@@ -1658,7 +1658,7 @@ class kucoin(Exchange):
 
     def _websocket_handle_ob(self, contextId, msg):
         symbolId = self.safe_string(msg['data'], 'symbol')
-        symbol = self.findSymbol(symbolId)
+        symbol = self._websocketFindSymbol(symbolId)
         seqIdStart = self.safe_integer(msg['data'], 'sequenceStart')
         seqIdEnd = self.safe_integer(msg['data'], 'sequenceEnd')
         symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
@@ -1703,7 +1703,7 @@ class kucoin(Exchange):
         dataSeq = self.safe_value(msg, 'data')
         data = self.safe_value(dataSeq, 'data')
         # symbolId = self.safe_string(data, 'symbol')
-        # symbol = self.findSymbol(symbolId)
+        # symbol = self._websocketFindSymbol(symbolId)
         # symbolData = self._contextGetSymbolData(contextId, 'ticker', symbol)
         # seqId = self.safe_integer(dataSeq, 'sequence')
         # if 'ticker_sequence_id' in symbolData:

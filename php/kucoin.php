@@ -1755,7 +1755,7 @@ class kucoin extends Exchange {
         $subject = $this->safe_string($msg, 'subject');
         $data = $this->safe_value($msg, 'data');
         // $symbolId = $this->safe_string($data, 'symbol');
-        // $symbol = $this->findSymbol ($symbolId);
+        // $symbol = $this->_websocketFindSymbol ($symbolId);
         // $symbolData = $this->_contextGetSymbolData ($contextId, 'trade', $symbol);
         // $seqId = $this->safe_integer($msg['data'], 'sequence');
         // if (is_array($symbolData) && array_key_exists('trade_sequence_id', $symbolData)) {
@@ -1784,7 +1784,7 @@ class kucoin extends Exchange {
 
     public function _websocket_handle_ob ($contextId, $msg) {
         $symbolId = $this->safe_string($msg['data'], 'symbol');
-        $symbol = $this->findSymbol ($symbolId);
+        $symbol = $this->_websocketFindSymbol ($symbolId);
         $seqIdStart = $this->safe_integer($msg['data'], 'sequenceStart');
         $seqIdEnd = $this->safe_integer($msg['data'], 'sequenceEnd');
         $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
@@ -1835,7 +1835,7 @@ class kucoin extends Exchange {
         $dataSeq = $this->safe_value($msg, 'data');
         $data = $this->safe_value($dataSeq, 'data');
         // $symbolId = $this->safe_string($data, 'symbol');
-        // $symbol = $this->findSymbol ($symbolId);
+        // $symbol = $this->_websocketFindSymbol ($symbolId);
         // $symbolData = $this->_contextGetSymbolData ($contextId, 'ticker', $symbol);
         // $seqId = $this->safe_integer($dataSeq, 'sequence');
         // if (is_array($symbolData) && array_key_exists('ticker_sequence_id', $symbolData)) {

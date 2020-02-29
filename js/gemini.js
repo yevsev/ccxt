@@ -839,7 +839,7 @@ module.exports = class gemini extends Exchange {
             parts = parts[0].split ('/');
             partsLen = parts.length;
             let symbol = parts[partsLen - 1];
-            symbol = this.findSymbol (symbol);
+            symbol = this._websocketFindSymbol (symbol);
             this._contextSet (contextId, 'symbol', symbol);
             params = params.split ('&');
             for (let i = 0; i < params.length; i++) {

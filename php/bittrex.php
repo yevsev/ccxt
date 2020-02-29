@@ -1586,7 +1586,7 @@ class bittrex extends Exchange {
 
     public function _websocket_handle_order_book_snapshot ($contextId, $data) {
         $id = $this->safe_string($data, 'M');
-        $symbol = $this->findSymbol ($id);
+        $symbol = $this->_websocketFindSymbol ($id);
         if (!$this->_contextIsSubscribed ($contextId, 'ob', $symbol)) {
             return;
         }
@@ -1600,7 +1600,7 @@ class bittrex extends Exchange {
     public function _websocket_handle_order_book_delta ($contextId, $data) {
         // array("M":"USDT-BTC","N":912014,"Z":[array("TY":0,"R":3504.97634920,"Q":0.26480207),array("TY":1,"R":3504.97634919,"Q":0.0)],"S":[array("TY":0,"R":3579.37236706,"Q":0.21455380),array("TY":1,"R":6429.20850000,"Q":0.0)],"f":array())
         $id = $this->safe_string($data, 'M');
-        $symbol = $this->findSymbol ($id);
+        $symbol = $this->_websocketFindSymbol ($id);
         if ($this->_contextIsSubscribed ($contextId, 'ob', $symbol)) {
             $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
             if (is_array($symbolData) && array_key_exists('ob', $symbolData)) {

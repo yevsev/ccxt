@@ -1340,7 +1340,7 @@ class bitmex(Exchange):
             else:
                 event = None
             if event is not None:
-                symbol = self.findSymbol(parts[1])
+                symbol = self._websocketFindSymbol(parts[1])
                 symbolData = self._contextGetSymbolData(contextId, event, symbol)
                 if 'sub-nonces' in symbolData:
                     nonces = symbolData['sub-nonces']
@@ -1366,7 +1366,7 @@ class bitmex(Exchange):
             else:
                 event = None
             if event is not None:
-                symbol = self.findSymbol(parts[1])
+                symbol = self._websocketFindSymbol(parts[1])
                 if success and event == 'ob':
                     dbids = self._contextGet(contextId, 'dbids')
                     if symbol in dbids:
@@ -1390,7 +1390,7 @@ class bitmex(Exchange):
             return
         symbol = self.safe_string(data[0], 'symbol')
         trades = self.parse_trades(data)
-        symbol = self.findSymbol(symbol)
+        symbol = self._websocketFindSymbol(symbol)
         for t in range(0, len(trades)):
             self.emit('trade', symbol, trades[t])
 
@@ -1399,7 +1399,7 @@ class bitmex(Exchange):
         data = self.safe_value(msg, 'data')
         symbol = self.safe_string(data[0], 'symbol')
         dbids = self._contextGet(contextId, 'dbids')
-        symbol = self.findSymbol(symbol)
+        symbol = self._websocketFindSymbol(symbol)
         symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
         if action == 'partial':
             ob = {

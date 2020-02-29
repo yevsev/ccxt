@@ -739,11 +739,11 @@ class bitfinex2 extends bitfinex {
         $ex = new ExchangeError ($this->id . ' ' . $errorCode . ':' . $errorMsg);
         if ($channel === 'book') {
             $id = $this->safe_string($msg, 'symbol');
-            $symbol = $this->findSymbol ($id);
+            $symbol = $this->_websocketFindSymbol ($id);
             $this->_websocket_process_pending_nonces ($contextId, 'sub-nonces', 'ob', $symbol, false, $ex);
         } else if ($channel === 'trades') {
             $id = $this->safe_string($msg, 'symbol');
-            $symbol = $this->findSymbol ($id);
+            $symbol = $this->_websocketFindSymbol ($id);
             $this->_websocket_process_pending_nonces ($contextId, 'sub-nonces', 'trade', $symbol, false, $ex);
         }
         $this->emit ('err', $ex, $contextId);
@@ -859,7 +859,7 @@ class bitfinex2 extends bitfinex {
 
     public function _websocket_handle_subscription ($contextId, $event, $msg) {
         $id = $this->safe_string($msg, 'symbol');
-        $symbol = $this->findSymbol ($id);
+        $symbol = $this->_websocketFindSymbol ($id);
         $channel = $this->safe_integer($msg, 'chanId');
         $chanKey = '_' . (string) $channel;
         $channels = $this->_contextGet ($contextId, 'channels');

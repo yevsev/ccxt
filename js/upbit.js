@@ -1571,7 +1571,7 @@ module.exports = class upbit extends Exchange {
         const id = code.replace ('CRIX.UPBIT.', '');
         type = type.replace ('crix', '');
         type = type.toLowerCase ();
-        const symbol = this.findSymbol (id);
+        const symbol = this._websocketFindSymbol (id);
         if (type === 'orderbook') {
             this._websocketHandleOrderBook (contextId, symbol, msg);
         } else if (type === 'trade') {

@@ -844,7 +844,7 @@ class gemini extends Exchange {
             $parts = explode('/', $parts[0]);
             $partsLen = is_array($parts) ? count($parts) : 0;
             $symbol = $parts[$partsLen - 1];
-            $symbol = $this->findSymbol ($symbol);
+            $symbol = $this->_websocketFindSymbol ($symbol);
             $this->_contextSet ($contextId, 'symbol', $symbol);
             $params = explode('&', $params);
             for ($i = 0; $i < count($params); $i++) {

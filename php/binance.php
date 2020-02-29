@@ -1802,7 +1802,7 @@ class binance extends Exchange {
             if ($msgType === 'depth') {
                 $this->_websocket_handle_ob ($contextId, $resData);
             } else if (mb_strpos($msgType, 'depth') !== false) {
-                $symbol = $this->findSymbol ($parts[0]);
+                $symbol = $this->_websocketFindSymbol ($parts[0]);
                 $this->_websocket_handle_partial_ob ($contextId, $symbol, $resData);
             } else if ($msgType === 'trade') {
                 $this->_websocket_handle_trade ($contextId, $resData);
@@ -1817,7 +1817,7 @@ class binance extends Exchange {
     }
 
     public function _websocket_handle_ob ($contextId, $data) {
-        $symbol = $this->findSymbol ($this->safe_string($data, 's'));
+        $symbol = $this->_websocketFindSymbol ($this->safe_string($data, 's'));
         // if asyncContext has no previous orderbook you have to cache all $deltas
         // and fetch orderbook from rest api
         $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
@@ -1871,14 +1871,14 @@ class binance extends Exchange {
     }
 
     public function _websocket_handle_trade ($contextId, $data) {
-        $symbol = $this->findSymbol ($this->safe_string($data, 's'));
+        $symbol = $this->_websocketFindSymbol ($this->safe_string($data, 's'));
         $market = $this->market ($symbol);
         $trade = $this->parse_trade($data, $market);
         $this->emit ('trade', $symbol, $trade);
     }
 
     public function _websocket_handle_kline ($contextId, $data) {
-        $symbol = $this->findSymbol ($this->safe_string($data, 's'));
+        $symbol = $this->_websocketFindSymbol ($this->safe_string($data, 's'));
         $market = $this->market ($symbol);
         $kline = $this->parse_ohlcv([
             $this->safe_float($data['k'], 't'),
@@ -1892,7 +1892,7 @@ class binance extends Exchange {
     }
 
     public function _websocket_handle_ticker ($contextId, $data) {
-        $symbol = $this->findSymbol ($this->safe_string($data, 's'));
+        $symbol = $this->_websocketFindSymbol ($this->safe_string($data, 's'));
         $market = $this->market ($symbol);
         $ticker = $this->parse_ticker(array(
             'symbol' => $this->safe_string($data, 's'),
@@ -2001,7 +2001,7 @@ class binance extends Exchange {
                 $pair = explode('@', $stream);
                 $partsLen = is_array($pair) ? count($pair) : 0;
                 if ($partsLen >= 2) {
-                    // $symbol = $this->findSymbol (strtoupper($pair[0]));
+                    // $symbol = $this->_websocketFindSymbol (strtoupper($pair[0]));
                     $event = strtolower($pair[1]);
                     if ($event === 'depth') {
                         $event = 'ob';

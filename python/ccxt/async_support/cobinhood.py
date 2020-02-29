@@ -855,7 +855,7 @@ class cobinhood(Exchange):
             return
         parts = channel.split('.')
         id = parts[1]
-        symbol = self.findSymbol(id)
+        symbol = self._websocketFindSymbol(id)
         if type == 'error':
             self.emit('err', new ExchangeError(self.id + ' error ' + h[3] + ':' + h[4]))
         elif type == 'pong':

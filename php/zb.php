@@ -701,7 +701,7 @@ class zb extends Exchange {
             return;
         }
         $id = $pairIdList[$pairId];
-        $symbol = $this->findSymbol ($id);
+        $symbol = $this->_websocketFindSymbol ($id);
         if (!$success) {
             $code = $this->safe_string($msg, 'code', '0');
             $errMsg = $this->safe_string($msg, 'message', 'unknown error');

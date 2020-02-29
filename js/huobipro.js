@@ -1283,7 +1283,7 @@ module.exports = class huobipro extends Exchange {
         const channel = vals[2];
         // :symbol
         // const symbol = this.marketsById[rawsymbol].symbol;
-        const symbol = this.findSymbol (rawsymbol);
+        const symbol = this._websocketFindSymbol (rawsymbol);
         // let channel = data.ch.split('.')[2];
         if (channel === 'depth') {
             // :ob emit

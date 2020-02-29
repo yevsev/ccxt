@@ -1663,7 +1663,7 @@ class binance(Exchange):
             if msgType == 'depth':
                 self._websocket_handle_ob(contextId, resData)
             elif msgType.find('depth') >= 0:
-                symbol = self.findSymbol(parts[0])
+                symbol = self._websocketFindSymbol(parts[0])
                 self._websocket_handle_partial_ob(contextId, symbol, resData)
             elif msgType == 'trade':
                 self._websocket_handle_trade(contextId, resData)
@@ -1675,7 +1675,7 @@ class binance(Exchange):
                 self._websocket_handle_ticker(contextId, resData)
 
     def _websocket_handle_ob(self, contextId, data):
-        symbol = self.findSymbol(self.safe_string(data, 's'))
+        symbol = self._websocketFindSymbol(self.safe_string(data, 's'))
         # if asyncContext has no previous orderbook you have to cache all deltas
         # and fetch orderbook from rest api
         symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
@@ -1720,13 +1720,13 @@ class binance(Exchange):
         self.emit('partob', symbol, orderbook)
 
     def _websocket_handle_trade(self, contextId, data):
-        symbol = self.findSymbol(self.safe_string(data, 's'))
+        symbol = self._websocketFindSymbol(self.safe_string(data, 's'))
         market = self.market(symbol)
         trade = self.parse_trade(data, market)
         self.emit('trade', symbol, trade)
 
     def _websocket_handle_kline(self, contextId, data):
-        symbol = self.findSymbol(self.safe_string(data, 's'))
+        symbol = self._websocketFindSymbol(self.safe_string(data, 's'))
         market = self.market(symbol)
         kline = self.parse_ohlcv([
             self.safe_float(data['k'], 't'),
@@ -1739,7 +1739,7 @@ class binance(Exchange):
         self.emit('ohlcv', symbol, kline)
 
     def _websocket_handle_ticker(self, contextId, data):
-        symbol = self.findSymbol(self.safe_string(data, 's'))
+        symbol = self._websocketFindSymbol(self.safe_string(data, 's'))
         market = self.market(symbol)
         ticker = self.parse_ticker({
             'symbol': self.safe_string(data, 's'),
@@ -1834,7 +1834,7 @@ class binance(Exchange):
                 pair = stream.split('@')
                 partsLen = len(pair)
                 if partsLen >= 2:
-                    # symbol = self.findSymbol(pair[0].upper())
+                    # symbol = self._websocketFindSymbol(pair[0].upper())
                     event = pair[1].lower()
                     if event == 'depth':
                         event = 'ob'

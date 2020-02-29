@@ -1578,7 +1578,7 @@ module.exports = class bittrex extends Exchange {
 
     _websocketHandleOrderBookSnapshot (contextId, data) {
         const id = this.safeString (data, 'M');
-        const symbol = this.findSymbol (id);
+        const symbol = this._websocketFindSymbol (id);
         if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
             return;
         }
@@ -1592,7 +1592,7 @@ module.exports = class bittrex extends Exchange {
     _websocketHandleOrderBookDelta (contextId, data) {
         // {"M":"USDT-BTC","N":912014,"Z":[{"TY":0,"R":3504.97634920,"Q":0.26480207},{"TY":1,"R":3504.97634919,"Q":0.0}],"S":[{"TY":0,"R":3579.37236706,"Q":0.21455380},{"TY":1,"R":6429.20850000,"Q":0.0}],"f":[]}
         const id = this.safeString (data, 'M');
-        const symbol = this.findSymbol (id);
+        const symbol = this._websocketFindSymbol (id);
         if (this._contextIsSubscribed (contextId, 'ob', symbol)) {
             const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
             if ('ob' in symbolData) {

@@ -643,7 +643,7 @@ class zb(Exchange):
             self.emit('err', new ExchangeError(self.id + ' error receiving unexpected market id ' + pairId))
             return
         id = pairIdList[pairId]
-        symbol = self.findSymbol(id)
+        symbol = self._websocketFindSymbol(id)
         if not success:
             code = self.safe_string(msg, 'code', '0')
             errMsg = self.safe_string(msg, 'message', 'unknown error')

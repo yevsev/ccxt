@@ -1456,7 +1456,7 @@ class bitmex extends Exchange {
                 $event = null;
             }
             if ($event !== null) {
-                $symbol = $this->findSymbol ($parts[1]);
+                $symbol = $this->_websocketFindSymbol ($parts[1]);
                 $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
                 if (is_array($symbolData) && array_key_exists('sub-nonces', $symbolData)) {
                     $nonces = $symbolData['sub-nonces'];
@@ -1488,7 +1488,7 @@ class bitmex extends Exchange {
                 $event = null;
             }
             if ($event !== null) {
-                $symbol = $this->findSymbol ($parts[1]);
+                $symbol = $this->_websocketFindSymbol ($parts[1]);
                 if ($success && $event === 'ob') {
                     $dbids = $this->_contextGet ($contextId, 'dbids');
                     if (is_array($dbids) && array_key_exists($symbol, $dbids)) {
@@ -1520,7 +1520,7 @@ class bitmex extends Exchange {
         }
         $symbol = $this->safe_string($data[0], 'symbol');
         $trades = $this->parse_trades($data);
-        $symbol = $this->findSymbol ($symbol);
+        $symbol = $this->_websocketFindSymbol ($symbol);
         for ($t = 0; $t < count($trades); $t++) {
             $this->emit ('trade', $symbol, $trades[$t]);
         }
@@ -1531,7 +1531,7 @@ class bitmex extends Exchange {
         $data = $this->safe_value($msg, 'data');
         $symbol = $this->safe_string($data[0], 'symbol');
         $dbids = $this->_contextGet ($contextId, 'dbids');
-        $symbol = $this->findSymbol ($symbol);
+        $symbol = $this->_websocketFindSymbol ($symbol);
         $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
         if ($action === 'partial') {
             $ob = array(

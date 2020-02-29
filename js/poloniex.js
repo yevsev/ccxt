@@ -1629,7 +1629,7 @@ module.exports = class poloniex extends Exchange {
         const sequenceNumber = data[1];
         if (data.length > 2) {
             const orderbook = data[2];
-            // let symbol = this.findSymbol (channelId.toString ());
+            // let symbol = this._websocketFindSymbol (channelId.toString ());
             // Check if this is the first response which contains full current orderbook
             if (orderbook[0][0] === 'i') {
                 if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {

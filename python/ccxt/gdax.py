@@ -810,7 +810,7 @@ class gdax(Exchange):
 
     def _websocket_handle_ob_snapshot(self, contextId, msg):
         id = self.safe_string(msg, 'product_id')
-        symbol = self.findSymbol(id)
+        symbol = self._websocketFindSymbol(id)
         symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
         ob = self.parse_order_book(msg)
         symbolData['ob'] = ob
@@ -819,7 +819,7 @@ class gdax(Exchange):
 
     def _websocket_handle_ob_update(self, contextId, msg):
         id = self.safe_string(msg, 'product_id')
-        symbol = self.findSymbol(id)
+        symbol = self._websocketFindSymbol(id)
         symbolData = self._contextGetSymbolData(contextId, 'ob', symbol)
         ob = symbolData['ob']
         changes = self.safe_value(msg, 'changes', [])
@@ -835,7 +835,7 @@ class gdax(Exchange):
         self._contextSetSymbolData(contextId, 'ob', symbol, symbolData)
 
     def _websocket_handle_subscription(self, contextId, event, msg):
-        symbol = self.findSymbol(msg)
+        symbol = self._websocketFindSymbol(msg)
         symbolData = self._contextGetSymbolData(contextId, event, symbol)
         if 'sub-nonces' in symbolData:
             nonces = symbolData['sub-nonces']

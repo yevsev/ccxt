@@ -920,7 +920,7 @@ class cobinhood extends Exchange {
         }
         $parts = explode('.', $channel);
         $id = $parts[1];
-        $symbol = $this->findSymbol ($id);
+        $symbol = $this->_websocketFindSymbol ($id);
         if ($type === 'error') {
             $this->emit ('err', new ExchangeError ($this->id . ' error ' . $h[3] . ':' . $h[4]));
         } else if ($type === 'pong') {

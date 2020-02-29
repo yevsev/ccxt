@@ -689,7 +689,7 @@ class lbank extends Exchange {
             if ($partsLen > 5) {
                 if ($parts[5] === 'depth') {
                     // orderbook
-                    $symbol = $this->findSymbol ($parts[3] . '_' . $parts[4]);
+                    $symbol = $this->_websocketFindSymbol ($parts[3] . '_' . $parts[4]);
                     // try to match with subscription
                     $found = false;
                     $data = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
@@ -726,7 +726,7 @@ class lbank extends Exchange {
             $partsLen = is_array($parts) ? count($parts) : 0;
             if ($partsLen > 5) {
                 if ($parts[5] === 'depth') {
-                    $symbol = $this->findSymbol ($parts[3] . '_' . $parts[4]);
+                    $symbol = $this->_websocketFindSymbol ($parts[3] . '_' . $parts[4]);
                     $this->_websocket_handle_ob ($contextId, $msg, $symbol);
                 }
             } else {

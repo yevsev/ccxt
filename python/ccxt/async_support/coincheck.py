@@ -415,7 +415,7 @@ class coincheck(Exchange):
             self._websocket_handle_ob(contextId, msg)
 
     def _websocket_handle_ob(self, contextId, msg):
-        symbol = self.findSymbol(msg[0])
+        symbol = self._websocketFindSymbol(msg[0])
         ob = msg[1]
         # just testing
         data = self._contextGetSymbolData(contextId, 'ob', symbol)

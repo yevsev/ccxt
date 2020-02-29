@@ -1038,6 +1038,13 @@ class Exchange(BaseExchange, EventEmitter):
     def _websocket_on_error(self, contextId):
         pass
 
+    def websocket_find_symbol (self, marketId):
+        if marketId in self.markets_by_id:
+            market = self.markets_by_id[marketId]
+            return market['symbol']
+        
+        return marketId
+
     def _websocketMarketId(self, symbol):
         return self.market_id(symbol)
 

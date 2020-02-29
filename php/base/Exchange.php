@@ -3692,6 +3692,14 @@ abstract class Exchange extends CcxtEventEmitter {
     protected function _websocket_on_error ($contextId) {
     }
 
+    protected function _websocketFindSymbol ($marketId) {
+        if (is_array($this->markets_by_id) && array_key_exists($marketId, $this->markets_by_id)) {
+            $market = $this->markets_by_id[$marketId];
+            return $market['symbol'];
+        }
+        return $marketId;
+    }
+
     public function _websocketMarketId ($symbol) {
         return $this->marketId($symbol);
     }

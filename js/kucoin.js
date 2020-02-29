@@ -1750,7 +1750,7 @@ module.exports = class kucoin extends Exchange {
         const subject = this.safeString (msg, 'subject');
         const data = this.safeValue (msg, 'data');
         // const symbolId = this.safeString (data, 'symbol');
-        // const symbol = this.findSymbol (symbolId);
+        // const symbol = this._websocketFindSymbol (symbolId);
         // const symbolData = this._contextGetSymbolData (contextId, 'trade', symbol);
         // const seqId = this.safeInteger (msg['data'], 'sequence');
         // if ('trade_sequence_id' in symbolData) {
@@ -1779,7 +1779,7 @@ module.exports = class kucoin extends Exchange {
 
     _websocketHandleOb (contextId, msg) {
         const symbolId = this.safeString (msg['data'], 'symbol');
-        const symbol = this.findSymbol (symbolId);
+        const symbol = this._websocketFindSymbol (symbolId);
         const seqIdStart = this.safeInteger (msg['data'], 'sequenceStart');
         const seqIdEnd = this.safeInteger (msg['data'], 'sequenceEnd');
         const symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
@@ -1830,7 +1830,7 @@ module.exports = class kucoin extends Exchange {
         const dataSeq = this.safeValue (msg, 'data');
         const data = this.safeValue (dataSeq, 'data');
         // const symbolId = this.safeString (data, 'symbol');
-        // const symbol = this.findSymbol (symbolId);
+        // const symbol = this._websocketFindSymbol (symbolId);
         // const symbolData = this._contextGetSymbolData (contextId, 'ticker', symbol);
         // const seqId = this.safeInteger (dataSeq, 'sequence');
         // if ('ticker_sequence_id' in symbolData) {

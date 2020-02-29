@@ -915,7 +915,7 @@ module.exports = class cobinhood extends Exchange {
         }
         const parts = channel.split ('.');
         const id = parts[1];
-        const symbol = this.findSymbol (id);
+        const symbol = this._websocketFindSymbol (id);
         if (type === 'error') {
             this.emit ('err', new ExchangeError (this.id + ' error ' + h[3] + ':' + h[4]));
         } else if (type === 'pong') {

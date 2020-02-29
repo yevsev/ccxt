@@ -735,11 +735,11 @@ module.exports = class bitfinex2 extends bitfinex {
         const ex = new ExchangeError (this.id + ' ' + errorCode + ':' + errorMsg);
         if (channel === 'book') {
             const id = this.safeString (msg, 'symbol');
-            const symbol = this.findSymbol (id);
+            const symbol = this._websocketFindSymbol (id);
             this._websocketProcessPendingNonces (contextId, 'sub-nonces', 'ob', symbol, false, ex);
         } else if (channel === 'trades') {
             const id = this.safeString (msg, 'symbol');
-            const symbol = this.findSymbol (id);
+            const symbol = this._websocketFindSymbol (id);
             this._websocketProcessPendingNonces (contextId, 'sub-nonces', 'trade', symbol, false, ex);
         }
         this.emit ('err', ex, contextId);
@@ -855,7 +855,7 @@ module.exports = class bitfinex2 extends bitfinex {
 
     _websocketHandleSubscription (contextId, event, msg) {
         const id = this.safeString (msg, 'symbol');
-        const symbol = this.findSymbol (id);
+        const symbol = this._websocketFindSymbol (id);
         const channel = this.safeInteger (msg, 'chanId');
         const chanKey = '_' + channel.toString ();
         let channels = this._contextGet (contextId, 'channels');

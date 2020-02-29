@@ -1293,7 +1293,7 @@ class therock extends Exchange {
 
     public function _websocket_handle_orderbook ($contextId, $msg) {
         $chan = $this->safe_string($msg, 'channel');
-        $symbol = $this->findSymbol ($chan);
+        $symbol = $this->_websocketFindSymbol ($chan);
         $data = $this->safe_value($msg, 'data');
         $time = $this->safe_string($data, 'time');
         $timestamp = $this->parse8601 ($time);
@@ -1306,7 +1306,7 @@ class therock extends Exchange {
 
     public function _websocket_handle_orderbook_diff ($contextId, $msg) {
         $chan = $this->safe_string($msg, 'channel');
-        $symbol = $this->findSymbol ($chan);
+        $symbol = $this->_websocketFindSymbol ($chan);
         $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
         if (!(is_array($symbolData) && array_key_exists('ob', $symbolData))) {
             // not previous snapshot -> don't process it
@@ -1332,7 +1332,7 @@ class therock extends Exchange {
         if ($chan === 'currency') {
             $event = 'trade';
         }
-        $symbol = $this->findSymbol ($chan);
+        $symbol = $this->_websocketFindSymbol ($chan);
         $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
         if (is_array($symbolData) && array_key_exists('sub-nonces', $symbolData)) {
             $nonces = $symbolData['sub-nonces'];

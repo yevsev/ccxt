@@ -1190,7 +1190,7 @@ module.exports = class bitstamp extends Exchange {
         if (parts.length > 2) {
             id = parts[2];
         }
-        const symbol = this.findSymbol (id);
+        const symbol = this._websocketFindSymbol (id);
         const data = this.safeValue (msg, 'data');
         const timestamp = this.safeInteger (data, 'timestamp');
         const ob = this.parseOrderBook (data, timestamp * 1000);
@@ -1227,7 +1227,7 @@ module.exports = class bitstamp extends Exchange {
         if (parts.length > 2) {
             id = parts[2];
         }
-        const symbol = this.findSymbol (id);
+        const symbol = this._websocketFindSymbol (id);
         const data = this.safeValue (msg, 'data');
         const trade = this._websocketParseTrade (data, symbol);
         this.emit ('trade', symbol, trade);
@@ -1249,7 +1249,7 @@ module.exports = class bitstamp extends Exchange {
             if (parts.length > 2) {
                 id = parts[2];
             }
-            const symbol = this.findSymbol (id);
+            const symbol = this._websocketFindSymbol (id);
             const symbolData = this._contextGetSymbolData (contextId, event, symbol);
             if ('sub-nonces' in symbolData) {
                 const nonces = symbolData['sub-nonces'];

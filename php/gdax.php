@@ -896,7 +896,7 @@ class gdax extends Exchange {
 
     public function _websocket_handle_ob_snapshot ($contextId, $msg) {
         $id = $this->safe_string($msg, 'product_id');
-        $symbol = $this->findSymbol ($id);
+        $symbol = $this->_websocketFindSymbol ($id);
         $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
         $ob = $this->parse_order_book($msg);
         $symbolData['ob'] = $ob;
@@ -906,7 +906,7 @@ class gdax extends Exchange {
 
     public function _websocket_handle_ob_update ($contextId, $msg) {
         $id = $this->safe_string($msg, 'product_id');
-        $symbol = $this->findSymbol ($id);
+        $symbol = $this->_websocketFindSymbol ($id);
         $symbolData = $this->_contextGetSymbolData ($contextId, 'ob', $symbol);
         $ob = $symbolData['ob'];
         $changes = $this->safe_value($msg, 'changes', array());
@@ -924,7 +924,7 @@ class gdax extends Exchange {
     }
 
     public function _websocket_handle_subscription ($contextId, $event, $msg) {
-        $symbol = $this->findSymbol ($msg);
+        $symbol = $this->_websocketFindSymbol ($msg);
         $symbolData = $this->_contextGetSymbolData ($contextId, $event, $symbol);
         if (is_array($symbolData) && array_key_exists('sub-nonces', $symbolData)) {
             $nonces = $symbolData['sub-nonces'];
